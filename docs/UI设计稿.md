@@ -3,7 +3,7 @@
 > **版本**：v0.1  
 > **日期**：2026-07-26  
 > **状态**：草稿  
-> **关联**：[需求文档](./需求文档.md) · [交互原型 Canvas](/Users/fwj/.cursor/projects/c-github/canvases/qmt-quant-ui-mockup.canvas.tsx)
+> **关联**：[需求文档](./需求文档.md) · [交互原型 Canvas](../canvases/qmt-quant-ui-mockup.canvas.tsx)
 
 ---
 
@@ -309,9 +309,9 @@ flowchart TD
 
 ## 8. 线框图索引
 
-可交互原型见 Canvas（点击左侧导航切换页面）：
+可交互原型见仓库内 Canvas 文件：
 
-**[qmt-quant-ui-mockup.canvas.tsx](/Users/fwj/.cursor/projects/c-github/canvases/qmt-quant-ui-mockup.canvas.tsx)**
+**[canvases/qmt-quant-ui-mockup.canvas.tsx](../canvases/qmt-quant-ui-mockup.canvas.tsx)**
 
 | 页面 | Canvas 中可体验 |
 |------|----------------|

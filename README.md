@@ -10,6 +10,7 @@
 
 - [产品需求文档（PRD）](./docs/需求文档.md)
 - [UI / 交互设计稿](./docs/UI设计稿.md)
+- [UI 交互原型 Canvas](./canvases/qmt-quant-ui-mockup.canvas.tsx)（Cursor 中可侧边预览）
 
 ## 技术栈
 
