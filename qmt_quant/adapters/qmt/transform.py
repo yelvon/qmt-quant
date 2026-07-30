@@ -1,0 +1,84 @@
+"""Transform xtquant data to storage rows."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import pandas as pd
+
+from qmt_quant.adapters.qmt.client import normalize_code
+from qmt_quant.storage.bars import BarRow
+
+
+def bars_from_dataframe(
+    code: str,
+    df: pd.DataFrame,
+    adjust_type: str = "front",
+) -> List[BarRow]:
+    if df is None or df.empty:
+        return []
+    frame = df.copy()
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        frame.index = pd.to_datetime(frame.index)
+    rows: List[BarRow] = []
+    for ts, row in frame.iterrows():
+        close = _num(row.get("close"))
+        quality = "ok"
+        if close is None or close <= 0:
+            quality = "bad"
+        rows.append(
+            BarRow(
+                code=normalize_code(code),
+                date=pd.Timestamp(ts).strftime("%Y-%m-%d"),
+                adjust_type=adjust_type,
+                open=_num(row.get("open")),
+                high=_num(row.get("high")),
+                low=_num(row.get("low")),
+                close=close,
+                volume=_num(row.get("volume")),
+                amount=_num(row.get("amount")),
+                pre_close=_num(row.get("pre_close") or row.get("preclose")),
+            )
+        )
+    return rows
+
+
+def financial_rows_from_frame(
+    code: str,
+    table: str,
+    df: pd.DataFrame,
+) -> List[Tuple[str, str, Optional[str], Dict[str, Any]]]:
+    if df is None or df.empty:
+        return []
+    rows: List[Tuple[str, str, Optional[str], Dict[str, Any]]] = []
+    for _, row in df.iterrows():
+        report_date = _date_str(row, ["report_date", "m_timetag", "endDate"])
+        announce_date = _date_str(row, ["announce_date", "announceDate", "m_anntime"])
+        payload = {k: _serialize(v) for k, v in row.to_dict().items()}
+        if report_date:
+            rows.append((normalize_code(code), report_date, announce_date, payload))
+    return rows
+
+
+def _num(v: Any) -> Optional[float]:
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _date_str(row: pd.Series, candidates: Iterable[str]) -> Optional[str]:
+    for key in candidates:
+        if key in row and row[key] is not None and not pd.isna(row[key]):
+            return pd.Timestamp(row[key]).strftime("%Y-%m-%d")
+    return None
+
+
+def _serialize(v: Any) -> Any:
+    if isinstance(v, (pd.Timestamp,)):
+        return v.strftime("%Y-%m-%d")
+    if pd.isna(v):
+        return None
+    return v

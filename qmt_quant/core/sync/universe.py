@@ -1,0 +1,68 @@
+"""Universe resolution."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List
+
+from qmt_quant.adapters.qmt.client import XtDataClient, normalize_code
+from qmt_quant.config import get_settings
+from qmt_quant.storage.database import db_session
+
+
+def load_watchlist(path: Path | None = None) -> List[str]:
+    settings = get_settings()
+    p = path or settings.resolve_path(settings.watchlist_path)
+    if not p.exists():
+        return []
+    codes = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            codes.append(normalize_code(line))
+    return codes
+
+
+def resolve_universe(sector: str | None = None) -> List[str]:
+    settings = get_settings()
+    sector_name = sector or settings.default_sector
+    if sector_name in ("watchlist", "自选池", "我的自选池"):
+        codes = load_watchlist()
+        if codes:
+            return codes
+    try:
+        client = XtDataClient()
+        return client.get_sector_stocks(sector_name)
+    except RuntimeError:
+        return _universe_from_db()
+
+
+def _universe_from_db() -> List[str]:
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT code FROM daily_bar ORDER BY code"
+        ).fetchall()
+        if rows:
+            return [r[0] for r in rows]
+        rows = conn.execute("SELECT code FROM instrument ORDER BY code").fetchall()
+    return [r[0] for r in rows]
+
+
+def sync_universe(sector: str | None = None) -> int:
+    codes = resolve_universe(sector)
+    client = XtDataClient()
+    with db_session() as conn:
+        for code in codes:
+            detail = client.get_instrument_detail(code)
+            name = detail.get("InstrumentName") or detail.get("name") or ""
+            list_date = detail.get("OpenDate") or detail.get("list_date")
+            conn.execute(
+                """
+                INSERT INTO instrument(code, name, list_date, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(code) DO UPDATE SET
+                    name=excluded.name, list_date=excluded.list_date, updated_at=datetime('now')
+                """,
+                (code, name, str(list_date) if list_date else None),
+            )
+    return len(codes)

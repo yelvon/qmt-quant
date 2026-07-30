@@ -1,0 +1,38 @@
+# data
+data/
+*.db
+*.db-journal
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+qmt-env/
+quant-env/
+
+# config secrets
+.env
+config/settings.yaml
+
+# web
+web/node_modules/
+web/dist/
+
+# ide
+.idea/
+.vscode/
+*.swp
+
+# reports
+reports/
+*.log
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/

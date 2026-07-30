@@ -1,0 +1,36 @@
+qmt:
+  install_dir: "C:\\qmt"
+  # xtquant is typically under QMT terminal bin.x64; doctor will try to locate it
+  xtquant_site_packages: ""
+  userdata_path: ""
+  account_id: ""
+
+python:
+  qmt_env: ""      # path to qmt-env python.exe
+  quant_env: ""    # path to quant-env python.exe (3.12+)
+
+data:
+  db_path: "data/qmt_quant.db"
+  parquet_catalog_dir: "data/catalog"
+  watchlist_path: "config/watchlist.txt"
+  default_sector: "沪深A股"
+  bar_adjust_type: "front"
+  sync_batch_size: 50
+  auto_export_catalog: true
+
+backtest:
+  initial_cash: 1000000
+  commission_rate: 0.0003
+  stamp_tax_rate: 0.001
+  min_commission: 5.0
+  transfer_fee_rate: 0.00002
+  slippage_bps: 5
+  match_price: "next_open"
+  max_weight_per_symbol: 0.1
+
+trade:
+  dry_run: true
+
+web:
+  host: "127.0.0.1"
+  port: 8788

@@ -1,0 +1,13 @@
+# quant-env: Python 3.12+ for backtest / screener
+# pip install -e ".[quant,web,dev]"
+
+-e .
+vectorbt>=0.26
+polars>=1.0
+pyarrow>=15.0
+quantstats>=0.0.62
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+pytest>=8.0
+httpx>=0.27
