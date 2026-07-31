@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -125,6 +126,7 @@ def research_run(
     short_preset: str = typer.Option("preset_std"),
     long_preset: str = typer.Option("preset_std"),
     fee_preset: str = typer.Option("default"),
+    screen_run_id: Optional[str] = typer.Option(None),
 ) -> None:
     from qmt_quant.core.research.runner import run_research
 
@@ -135,6 +137,7 @@ def research_run(
         short_preset=short_preset,
         long_preset=long_preset,
         fee_preset=fee_preset,
+        screen_run_id=screen_run_id,
     )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -147,6 +150,7 @@ def validate_run(
     long: int = typer.Option(120),
     match: str = typer.Option("next_open"),
     benchmark: str = typer.Option("hs300"),
+    screen_run_id: Optional[str] = typer.Option(None),
 ) -> None:
     from qmt_quant.core.validation.runner import run_validation
 
@@ -157,6 +161,7 @@ def validate_run(
         long_window=long,
         match_price=match,
         benchmark=benchmark,
+        screen_run_id=screen_run_id,
     )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -164,18 +169,49 @@ def validate_run(
 @screen_app.command("run")
 def screen_run(
     template: str = typer.Option("low_pe"),
+    rule: Optional[Path] = typer.Option(None, help="YAML rule file"),
     top: int = typer.Option(30),
     sector: str = typer.Option("沪深A股"),
     exclude_st: bool = typer.Option(True),
+    pe_max: Optional[float] = typer.Option(None),
+    roe_min: Optional[float] = typer.Option(None),
 ) -> None:
+    from qmt_quant.core.screener.dsl import load_rule
     from qmt_quant.core.screener.runner import run_screening
 
+    dsl_rule = load_rule(rule) if rule else None
     result = run_screening(
         template_id=template,
         top_n=top,
         sector=sector,
         exclude_st=exclude_st,
+        pe_max=pe_max,
+        roe_min=roe_min,
+        rule=dsl_rule,
     )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@screen_app.command("backtest")
+def screen_backtest(
+    run_id: str = typer.Option(..., help="Screening run id"),
+    engine: str = typer.Option("vectorbt", help="vectorbt|validate"),
+    range_preset: str = typer.Option("3y"),
+) -> None:
+    from qmt_quant.core.screener.bridge import run_screen_backtest
+
+    result = run_screen_backtest(run_id=run_id, engine=engine, range_preset=range_preset)
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@screen_app.command("ic")
+def screen_ic(
+    template: str = typer.Option("low_pe"),
+    sector: str = typer.Option("沪深A股"),
+) -> None:
+    from qmt_quant.core.screener.ic import compute_factor_ic
+
+    result = compute_factor_ic(template_id=template, sector=sector)
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -184,6 +220,25 @@ def trade_status() -> None:
     from qmt_quant.core.trade.service import get_trade_status
 
     typer.echo(json.dumps(get_trade_status(), ensure_ascii=False, indent=2))
+
+
+@trade_app.command("submit")
+def trade_submit(
+    codes: str = typer.Option(..., help="Comma-separated codes"),
+    side: str = typer.Option("buy"),
+    quantity: int = typer.Option(100),
+    live: bool = typer.Option(False),
+    confirm: Optional[str] = typer.Option(None),
+) -> None:
+    if live and confirm != "LIVE":
+        typer.echo("Live orders require --confirm LIVE", err=True)
+        raise typer.Exit(code=1)
+    from qmt_quant.core.trade.service import preview_signal_orders, submit_orders
+
+    code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    orders = preview_signal_orders(code_list, side=side, quantity=quantity)
+    result = submit_orders(orders, live=live)
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @serve_app.command("api")

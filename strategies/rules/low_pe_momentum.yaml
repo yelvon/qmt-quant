@@ -1,0 +1,17 @@
+name: 低估值动量
+as_of: latest_trading_day
+filters:
+  - field: pe_ttm
+    op: "<"
+    value: 30
+  - field: roe
+    op: ">"
+    value: 0.10
+  - field: close
+    op: above_ma
+    params: { window: 60 }
+exclude:
+  - st: true
+  - list_days_lt: 120
+rank_by: momentum_20d
+top_n: 30

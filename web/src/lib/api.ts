@@ -18,6 +18,16 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return res.json();
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : "{}",
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export function useJobProgress(onUpdate: (data: Record<string, unknown>) => void) {
   React.useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";

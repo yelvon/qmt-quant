@@ -91,6 +91,11 @@ export default function ResearchPage() {
           <p className="mt-2 text-sm text-emerald-400">
             最优：{result?.best?.label} · 收益 {result?.best?.total_return_pct}%
           </p>
+          {result?.quantstats && (
+            <p className="text-sm text-slate-300">
+              夏普 {result.quantstats.sharpe ?? "—"} · 回撤 {result.quantstats.max_drawdown_pct ?? "—"}%
+            </p>
+          )}
         </div>
       )}
     </div>

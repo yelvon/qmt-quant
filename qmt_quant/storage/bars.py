@@ -78,6 +78,27 @@ def load_bars_df(
     return df
 
 
+def quality_stats(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[str, object]:
+    rows = conn.execute(
+        """
+        SELECT quality_status, COUNT(*) AS cnt
+        FROM daily_bar WHERE adjust_type = ?
+        GROUP BY quality_status
+        """,
+        (adjust_type,),
+    ).fetchall()
+    counts = {r[0]: r[1] for r in rows}
+    total = sum(counts.values()) or 1
+    bad = counts.get("bad", 0)
+    suspicious = counts.get("suspicious", 0)
+    return {
+        "bad_bars_count": bad,
+        "suspicious_bars_count": suspicious,
+        "suspicious_pct": round((bad + suspicious) / total * 100, 2),
+        "by_status": counts,
+    }
+
+
 def coverage_stats(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[str, object]:
     row = conn.execute(
         """

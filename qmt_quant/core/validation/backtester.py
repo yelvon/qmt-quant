@@ -9,6 +9,15 @@ import numpy as np
 import pandas as pd
 
 from qmt_quant.config import get_settings
+from qmt_quant.core.screener.bridge import load_codes_by_run_id
+from qmt_quant.core.validation.venue_cn_a_share import (
+    DEFAULT_VENUE,
+    FeeConfig,
+    commission,
+    round_lots,
+    stamp_duty,
+    transfer_fee,
+)
 
 
 @dataclass
@@ -38,20 +47,31 @@ class AShareDailyBacktester:
         self,
         prices: pd.DataFrame,
         *,
+        ohlcv: pd.DataFrame | None = None,
         initial_cash: float | None = None,
         commission_rate: float | None = None,
         stamp_tax_rate: float | None = None,
         min_commission: float | None = None,
+        transfer_fee_rate: float | None = None,
+        slippage_bps: float | None = None,
         match_price: str = "next_open",
+        enforce_limit: bool = True,
     ) -> None:
         settings = get_settings()
         self.prices = prices.sort_index()
+        self.ohlcv = ohlcv
         self.dates = list(self.prices.index)
         self.initial_cash = initial_cash or settings.initial_cash
-        self.commission_rate = commission_rate or settings.commission_rate
-        self.stamp_tax_rate = stamp_tax_rate or settings.stamp_tax_rate
-        self.min_commission = min_commission or settings.min_commission
+        self.fees = FeeConfig(
+            commission_rate=commission_rate or settings.commission_rate,
+            min_commission=min_commission or settings.min_commission,
+            stamp_duty_rate=stamp_tax_rate or settings.stamp_tax_rate,
+            transfer_fee_rate=transfer_fee_rate or settings.transfer_fee_rate,
+        )
+        self.slippage_bps = slippage_bps if slippage_bps is not None else settings.slippage_bps
         self.match_price = match_price
+        self.enforce_limit = enforce_limit
+        self.venue = DEFAULT_VENUE
         self.cash = self.initial_cash
         self.positions: Dict[str, int] = {}
         self.buy_dates: Dict[str, pd.Timestamp] = {}
@@ -65,52 +85,182 @@ class AShareDailyBacktester:
             fast = s.rolling(short_window).mean()
             slow = s.rolling(long_window).mean()
             signal[code] = (fast > slow).astype(float)
+        return self._run_signal_loop(signal)
 
+    def run_buy_hold(self) -> ValidationResult:
+        signal = pd.DataFrame(1.0, index=self.prices.index, columns=self.prices.columns)
+        return self._run_signal_loop(signal, hold_only=True)
+
+    def run_pe_momentum(
+        self,
+        *,
+        pe_threshold: float = 30,
+        momentum_window: int = 20,
+    ) -> ValidationResult:
+        from qmt_quant.core.research.factors import load_pe_matrix
+        from qmt_quant.storage.database import db_session
+
+        with db_session() as conn:
+            pe_mat = load_pe_matrix(conn, self.prices.index, list(self.prices.columns))
+        mom = self.prices.pct_change(momentum_window)
+        signal = ((pe_mat <= pe_threshold) & (mom > 0)).astype(float)
+        return self._run_signal_loop(signal)
+
+    def run_screening_rebalance(
+        self,
+        screen_run_id: str | None,
+        *,
+        rebalance_days: int = 20,
+    ) -> ValidationResult:
+        codes = load_codes_by_run_id(screen_run_id) if screen_run_id else []
+        if not codes:
+            return ValidationResult(verdict="建议复核")
+        signal = pd.DataFrame(0.0, index=self.prices.index, columns=self.prices.columns)
+        valid = [c for c in codes if c in signal.columns]
+        if not valid:
+            return ValidationResult(verdict="建议复核")
+        for i in range(0, len(self.dates), rebalance_days):
+            dt = self.dates[i]
+            for c in valid:
+                signal.loc[dt:, c] = 1.0
+        return self._run_signal_loop(signal)
+
+    def _run_signal_loop(
+        self,
+        signal: pd.DataFrame,
+        *,
+        hold_only: bool = False,
+    ) -> ValidationResult:
         for i, dt in enumerate(self.dates):
             if i == 0:
                 self._record_equity(dt)
                 continue
-            exec_idx = i if self.match_price == "close" else min(i, len(self.dates) - 1)
+            exec_idx = self._exec_index(i)
+            if exec_idx is None:
+                self._record_equity(dt)
+                continue
             exec_date = self.dates[exec_idx]
             for code in self.prices.columns:
                 prev_sig = signal.iloc[i - 1][code]
                 curr_sig = signal.iloc[i][code]
-                price = float(self.prices.iloc[exec_idx][code])
-                if np.isnan(price) or price <= 0:
+                exec_price = self._exec_price(code, exec_idx)
+                if exec_price is None or exec_price <= 0:
                     continue
                 pos = self.positions.get(code, 0)
                 if prev_sig <= 0 and curr_sig > 0 and pos == 0:
-                    qty = int(self.cash * 0.1 / price / 100) * 100
-                    if qty >= 100:
-                        self._buy(exec_date, code, price, qty)
-                elif prev_sig > 0 and curr_sig <= 0 and pos > 0:
-                    if self._can_sell(code, dt):
-                        self._sell(exec_date, code, price, pos)
+                    if self._limit_blocks_buy(code, exec_idx):
+                        continue
+                    qty = round_lots(self.cash * 0.1 / exec_price, self.venue.lot_size)
+                    if qty >= self.venue.lot_size:
+                        self._buy(exec_date, code, exec_price, qty)
+                elif not hold_only and prev_sig > 0 and curr_sig <= 0 and pos > 0:
+                    if self._can_sell(code, dt) and not self._limit_blocks_sell(code, exec_idx):
+                        self._sell(exec_date, code, exec_price, pos)
             self._record_equity(dt)
-
         return self._build_result()
 
+    def _exec_index(self, signal_idx: int) -> int | None:
+        if self.match_price == "close":
+            return signal_idx
+        nxt = signal_idx + 1
+        return nxt if nxt < len(self.dates) else None
+
+    def _exec_price(self, code: str, exec_idx: int) -> float | None:
+        if self.ohlcv is not None and self.match_price == "next_open":
+            try:
+                row = self.ohlcv.loc[self.dates[exec_idx]]
+                if isinstance(row, pd.DataFrame):
+                    row = row[row["code"] == code].iloc[0]
+                px = float(row.get("open") or row.get("close") or self.prices.iloc[exec_idx][code])
+            except (KeyError, IndexError, TypeError):
+                px = float(self.prices.iloc[exec_idx][code])
+        else:
+            px = float(self.prices.iloc[exec_idx][code])
+        if np.isnan(px):
+            return None
+        return px
+
+    def _apply_slippage(self, price: float, side: str) -> float:
+        slip = self.slippage_bps / 10000.0
+        if side == "buy":
+            return price * (1 + slip)
+        return price * (1 - slip)
+
+    def _limit_blocks_buy(self, code: str, exec_idx: int) -> bool:
+        if not self.enforce_limit or self.ohlcv is None:
+            return False
+        return self._at_limit_up(code, exec_idx)
+
+    def _limit_blocks_sell(self, code: str, exec_idx: int) -> bool:
+        if not self.enforce_limit or self.ohlcv is None:
+            return False
+        return self._at_limit_down(code, exec_idx)
+
+    def _at_limit_up(self, code: str, exec_idx: int) -> bool:
+        pre, high = self._pre_close_high(code, exec_idx)
+        if pre is None or high is None or pre <= 0:
+            return False
+        limit = pre * 1.1 if not code.startswith("3") else pre * 1.2
+        return high >= limit * 0.999
+
+    def _at_limit_down(self, code: str, exec_idx: int) -> bool:
+        pre, _ = self._pre_close_high(code, exec_idx)
+        low = self._bar_low(code, exec_idx)
+        if pre is None or low is None or pre <= 0:
+            return False
+        limit = pre * 0.9 if not code.startswith("3") else pre * 0.8
+        return low <= limit * 1.001
+
+    def _pre_close_high(self, code: str, exec_idx: int) -> tuple[float | None, float | None]:
+        dt = self.dates[exec_idx]
+        try:
+            row = self.ohlcv[(self.ohlcv["code"] == code) & (self.ohlcv["date"] == dt.strftime("%Y-%m-%d"))]
+            if row.empty:
+                row = self.ohlcv[(self.ohlcv["code"] == code) & (self.ohlcv.index == dt)]
+            if row.empty:
+                return None, None
+            r = row.iloc[0]
+            return float(r.get("pre_close") or 0) or None, float(r.get("high") or 0) or None
+        except (KeyError, TypeError, AttributeError):
+            return None, None
+
+    def _bar_low(self, code: str, exec_idx: int) -> float | None:
+        dt = self.dates[exec_idx]
+        try:
+            row = self.ohlcv[(self.ohlcv["code"] == code) & (self.ohlcv["date"] == dt.strftime("%Y-%m-%d"))]
+            if row.empty:
+                return None
+            return float(row.iloc[0].get("low") or 0) or None
+        except (KeyError, TypeError, AttributeError):
+            return None
+
     def _buy(self, dt: pd.Timestamp, code: str, price: float, qty: int) -> None:
+        price = self._apply_slippage(price, "buy")
         amount = price * qty
-        fee = max(amount * self.commission_rate, self.min_commission)
+        comm = commission(amount, self.fees)
+        xfer = transfer_fee(amount, code, self.fees)
+        fee = comm + xfer
         if self.cash < amount + fee:
             return
         self.cash -= amount + fee
         self.positions[code] = self.positions.get(code, 0) + qty
         self.buy_dates[code] = dt
         self.trades.append(
-            Trade(dt.strftime("%Y-%m-%d"), code, "买入", price, qty, round(fee, 2))
+            Trade(dt.strftime("%Y-%m-%d"), code, "买入", round(price, 4), qty, round(fee, 2))
         )
 
     def _sell(self, dt: pd.Timestamp, code: str, price: float, qty: int) -> None:
+        price = self._apply_slippage(price, "sell")
         amount = price * qty
-        fee = max(amount * self.commission_rate, self.min_commission)
-        tax = amount * self.stamp_tax_rate
-        self.cash += amount - fee - tax
+        comm = commission(amount, self.fees)
+        tax = stamp_duty(amount, self.fees)
+        xfer = transfer_fee(amount, code, self.fees)
+        fee = comm + tax + xfer
+        self.cash += amount - fee
         self.positions[code] = 0
         self.buy_dates.pop(code, None)
         self.trades.append(
-            Trade(dt.strftime("%Y-%m-%d"), code, "卖出", price, qty, round(fee + tax, 2))
+            Trade(dt.strftime("%Y-%m-%d"), code, "卖出", round(price, 4), qty, round(fee, 2))
         )
 
     def _can_sell(self, code: str, dt: pd.Timestamp) -> bool:

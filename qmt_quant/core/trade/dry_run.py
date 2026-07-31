@@ -13,8 +13,8 @@ def execute_orders(orders: List[Dict[str, Any]], dry_run: bool = True) -> List[D
     run_migrations()
     trader = QmtTrader()
     trader.connect()
+    portfolio_value = trader.portfolio_value()
     results = []
-    portfolio_value = 1_000_000.0
     for raw in orders:
         req = OrderRequest(
             code=raw["code"],
@@ -23,13 +23,14 @@ def execute_orders(orders: List[Dict[str, Any]], dry_run: bool = True) -> List[D
             price=raw.get("price"),
         )
         order_value = (req.price or 0) * req.quantity
+        is_st = _is_st_code(req.code)
         ok, msg = check_order(
             code=req.code,
             side=req.side,
             quantity=req.quantity,
             portfolio_value=portfolio_value,
-            order_value=order_value,
-            is_st="ST" in req.code.upper(),
+            order_value=order_value or portfolio_value * 0.01,
+            is_st=is_st,
         )
         if not ok:
             results.append({"error": msg, **raw})
@@ -53,3 +54,11 @@ def execute_orders(orders: List[Dict[str, Any]], dry_run: bool = True) -> List[D
             )
         results.append(out)
     return results
+
+
+def _is_st_code(code: str) -> bool:
+    with db_session() as conn:
+        row = conn.execute("SELECT is_st FROM instrument WHERE code=?", (code,)).fetchone()
+    if row is not None:
+        return bool(row[0])
+    return "ST" in code.upper()

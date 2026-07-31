@@ -8,10 +8,11 @@
 |------|------|
 | ① 总览 | 环境/数据状态、一键跑通 ②→③→④ |
 | ② 准备数据 | QMT 同步日线/财报、导出 Parquet |
-| ③ 快速试策略 | VectorBT 双均线参数扫描 |
-| ④ 仔细验策略 | A 股 T+1 高保真回测 + 与 ③ 对比 |
-| ⑤ 选股 | 模板 + Polars 规则 |
-| ⑥ 实盘 | xttrader 适配，默认 dry_run |
+| ③ 快速试策略 | VectorBT 参数扫描（双均线 / 低PE动量 / 选股调仓） |
+| ④ 仔细验策略 | 自研 A 股验证器（T+1/滑点/涨跌停）+ 与 ③ 对比 |
+| ⑤ 选股 | 模板 + 可视化条件 + YAML 规则 |
+| ⑥ 实盘 | xttrader 连接，默认 dry_run |
+| 设置 / 任务记录 | QMT 路径、环境 Python、任务历史 |
 
 ## 双环境安装
 
@@ -21,12 +22,10 @@
 
 ```powershell
 cd C:\github\qmt-quant
-# 将 QMT site-packages 加入 PYTHONPATH，路径以本机为准
 $env:PYTHONPATH = "C:\qmt\<终端>\bin.x64\Lib\site-packages"
 pip install -r requirements-qmt.txt
 pip install -e .
 copy config\settings.yaml.example config\settings.yaml
-# 编辑 settings.yaml：qmt.install_dir、python.qmt_env 等
 python -m qmt_quant.cli doctor
 python -m qmt_quant.cli init-db
 ```
@@ -48,6 +47,8 @@ python -m qmt_quant.cli doctor
 python:
   qmt_env: C:\path\to\qmt\python.exe
   quant_env: C:\github\qmt-quant\.venv-quant\Scripts\python.exe
+jobs:
+  inline: false   # Web 在 quant-env 时，sync 任务自动 subprocess 到 qmt-env
 ```
 
 ## CLI 常用命令
@@ -56,18 +57,27 @@ python:
 # 数据
 python -m qmt_quant.cli sync bars --incremental
 python -m qmt_quant.cli sync financial
+python -m qmt_quant.cli sync universe
 python -m qmt_quant.cli catalog export
 python -m qmt_quant.cli sync check
 
 # 研究 / 验证
 python -m qmt_quant.cli research run --strategy ma_cross --range-preset 3y
+python -m qmt_quant.cli research run --strategy pe_momentum
 python -m qmt_quant.cli validate run --from-run <run_id>
 
-# 选股 / 一键流水线
+# 选股
 python -m qmt_quant.cli screen run --template low_pe
-python -m qmt_quant.cli pipeline
+python -m qmt_quant.cli screen run --rule strategies/rules/low_pe_momentum.yaml
+python -m qmt_quant.cli screen backtest --run-id <id> --engine vectorbt
+python -m qmt_quant.cli screen ic --template low_pe
 
-# Web API
+# 实盘
+python -m qmt_quant.cli trade status
+python -m qmt_quant.cli trade submit --codes 600519.SH --live --confirm LIVE
+
+# 一键流水线 / Web API
+python -m qmt_quant.cli pipeline
 python -m qmt_quant.cli serve api
 ```
 
@@ -94,23 +104,33 @@ npm run dev
 ```
 qmt-quant/
 ├── config/settings.yaml.example
+├── docs/CHANGELOG.md          # 变更记录
+├── docs/progress.md           # PRD 进度对照
 ├── migrations/001_init.sql
-├── qmt_quant/          # Python 包
-├── strategies/         # vectorbt / nautilus 策略
-├── web/                # React + Vite 前端
+├── qmt_quant/
+├── strategies/rules/          # 选股 YAML 规则
+├── web/
 ├── tests/
-└── data/               # SQLite + Parquet（gitignore）
+└── data/
 ```
 
 ## 文档
 
+- [AGENTS.md](./AGENTS.md) — **AI / 开发者协作规则（含变更记录要求）**
 - [产品需求文档](./docs/需求文档.md)
+- [实施进度](./docs/progress.md)
+- [变更记录](./docs/CHANGELOG.md)
 - [UI 设计稿](./docs/UI设计稿.md)
-- [Canvas 原型](./canvases/qmt-quant-ui-mockup.canvas.tsx)
 
 ## 测试
 
 ```powershell
-pip install -e ".[dev]"
+pip install -e ".[quant,web,dev]"
 pytest
 ```
+
+GitHub Actions 在 push/PR 时自动运行 pytest（Linux，无需 QMT）。
+
+## 验证层说明
+
+当前验证层使用自研 `AShareDailyBacktester`（T+1、滑点、过户费、涨跌停可选），通过 `ValidationEngine` 接口预留 **NautilusTrader** 接入（Phase 7）。

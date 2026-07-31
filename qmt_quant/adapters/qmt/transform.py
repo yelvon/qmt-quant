@@ -22,25 +22,47 @@ def bars_from_dataframe(
         frame.index = pd.to_datetime(frame.index)
     rows: List[BarRow] = []
     for ts, row in frame.iterrows():
+        o = _num(row.get("open"))
+        h = _num(row.get("high"))
+        l = _num(row.get("low"))
         close = _num(row.get("close"))
-        quality = "ok"
-        if close is None or close <= 0:
-            quality = "bad"
+        volume = _num(row.get("volume"))
+        quality = _bar_quality(o, h, l, close, volume)
         rows.append(
             BarRow(
                 code=normalize_code(code),
                 date=pd.Timestamp(ts).strftime("%Y-%m-%d"),
                 adjust_type=adjust_type,
-                open=_num(row.get("open")),
-                high=_num(row.get("high")),
-                low=_num(row.get("low")),
+                open=o,
+                high=h,
+                low=l,
                 close=close,
-                volume=_num(row.get("volume")),
+                volume=volume,
                 amount=_num(row.get("amount")),
                 pre_close=_num(row.get("pre_close") or row.get("preclose")),
+                quality_status=quality,
             )
         )
     return rows
+
+
+def _bar_quality(
+    open_: Optional[float],
+    high: Optional[float],
+    low: Optional[float],
+    close: Optional[float],
+    volume: Optional[float],
+) -> str:
+    if close is None or close <= 0:
+        return "bad"
+    if high is not None and low is not None and high < low:
+        return "bad"
+    if open_ is not None and high is not None and low is not None:
+        if open_ > high or open_ < low or close > high or close < low:
+            return "bad"
+    if volume is None or volume <= 0:
+        return "suspicious"
+    return "ok"
 
 
 def financial_rows_from_frame(

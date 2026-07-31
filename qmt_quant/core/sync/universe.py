@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from qmt_quant.adapters.qmt.client import XtDataClient, normalize_code
 from qmt_quant.config import get_settings
@@ -56,13 +57,43 @@ def sync_universe(sector: str | None = None) -> int:
             detail = client.get_instrument_detail(code)
             name = detail.get("InstrumentName") or detail.get("name") or ""
             list_date = detail.get("OpenDate") or detail.get("list_date")
+            delist_date = detail.get("ExpireDate") or detail.get("delist_date")
+            is_st = 1 if _is_st(name, detail) else 0
             conn.execute(
                 """
-                INSERT INTO instrument(code, name, list_date, updated_at)
-                VALUES (?, ?, ?, datetime('now'))
+                INSERT INTO instrument(code, name, list_date, delist_date, is_st, updated_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(code) DO UPDATE SET
-                    name=excluded.name, list_date=excluded.list_date, updated_at=datetime('now')
+                    name=excluded.name,
+                    list_date=excluded.list_date,
+                    delist_date=excluded.delist_date,
+                    is_st=excluded.is_st,
+                    updated_at=datetime('now')
                 """,
-                (code, name, str(list_date) if list_date else None),
+                (
+                    code,
+                    name,
+                    str(list_date) if list_date else None,
+                    str(delist_date) if delist_date else None,
+                    is_st,
+                ),
             )
     return len(codes)
+
+
+def _is_st(name: str, detail: dict) -> bool:
+    if "ST" in (name or "").upper():
+        return True
+    flag = detail.get("IsST") or detail.get("is_st")
+    return bool(flag)
+
+
+def list_days_since(list_date: Optional[str], as_of: Optional[str] = None) -> Optional[int]:
+    if not list_date:
+        return None
+    try:
+        start = datetime.strptime(str(list_date)[:10], "%Y-%m-%d").date()
+        end = datetime.strptime(as_of or date.today().isoformat(), "%Y-%m-%d").date()
+        return (end - start).days
+    except ValueError:
+        return None

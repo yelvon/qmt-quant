@@ -13,6 +13,8 @@ from qmt_quant.config import ROOT_DIR, get_settings
 from qmt_quant.core.catalog.export import load_price_matrix
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import FEE_PRESETS, ma_param_combos
+from qmt_quant.core.research.report import build_quantstats_summary
+from qmt_quant.core.screener.bridge import load_codes_by_run_id
 from qmt_quant.core.sync.universe import resolve_universe
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import save_backtest_run
@@ -27,19 +29,28 @@ def run_research(
     long_preset: str = "preset_std",
     fee_preset: str = "default",
     codes: Optional[List[str]] = None,
+    screen_run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     settings = get_settings()
     start, end = resolve_range_preset(range_preset)
-    universe = codes or resolve_universe(sector)
-    if sector == "watchlist" or sector == "我的自选池":
-        universe = resolve_universe("watchlist")
+    if screen_run_id:
+        universe = load_codes_by_run_id(screen_run_id)
+    elif codes:
+        universe = codes
+    else:
+        universe = resolve_universe(sector)
+        if sector in ("watchlist", "我的自选池"):
+            universe = resolve_universe("watchlist")
+
+    cap = None if strategy_id == "screening_rebalance" else 50
+    load_codes = universe[:cap] if cap and universe else universe
 
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
         start_date=start,
         end_date=end,
-        codes=universe[:50] if universe else None,
+        codes=load_codes if load_codes else None,
     )
     if prices.empty:
         return {"error": "no_price_data", "message": "请先同步日线数据"}
@@ -50,12 +61,21 @@ def run_research(
         result = _run_ma_cross_scan(prices, short_preset, long_preset, fees)
     elif strategy_id == "buy_hold":
         result = _run_buy_hold(prices, fees)
+    elif strategy_id == "pe_momentum":
+        result = _run_pe_momentum(prices, fees)
+    elif strategy_id == "screening_rebalance":
+        result = _run_screening_rebalance(prices, fees, screen_run_id)
     else:
         result = _run_ma_cross_scan(prices, short_preset, long_preset, fees)
 
+    equity_map = _equity_from_result(result, prices)
+    result["quantstats"] = build_quantstats_summary(equity_map)
+    result["best"]["quantstats"] = result["quantstats"]
+
     reports_dir = ROOT_DIR / "reports"
     reports_dir.mkdir(exist_ok=True)
-    result_path = reports_dir / f"research_{result['best']['label'].replace('/', '_')}.json"
+    label = result["best"].get("label", strategy_id).replace("/", "_")
+    result_path = reports_dir / f"research_{label}.json"
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     with db_session() as conn:
@@ -70,6 +90,7 @@ def run_research(
                 "short_preset": short_preset,
                 "long_preset": long_preset,
                 "fee_preset": fee_preset,
+                "screen_run_id": screen_run_id,
             },
             metrics=result["best"],
             result_path=str(result_path),
@@ -77,6 +98,14 @@ def run_research(
     result["run_id"] = run_id
     result["result_path"] = str(result_path)
     return result
+
+
+def _equity_from_result(result: Dict[str, Any], prices: pd.DataFrame) -> Dict[str, float]:
+    if result.get("equity_curve"):
+        return {e["date"]: e["equity"] / 100 for e in result["equity_curve"]}
+    rets = prices.pct_change().fillna(0).mean(axis=1)
+    equity = (1 + rets).cumprod()
+    return {dt.strftime("%Y-%m-%d"): float(v) for dt, v in equity.items()}
 
 
 def _run_ma_cross_scan(
@@ -150,3 +179,39 @@ def _run_buy_hold(prices: pd.DataFrame, fees: float) -> Dict[str, Any]:
     total = float((1 + rets).prod() - 1 - fees)
     best = {"label": "buy_hold", "total_return_pct": round(total * 100, 2)}
     return {"strategy": "buy_hold", "combos": [best], "best": best, "engine": "vectorbt"}
+
+
+def _run_pe_momentum(prices: pd.DataFrame, fees: float) -> Dict[str, Any]:
+    from qmt_quant.core.research.factors import load_pe_matrix
+
+    with db_session() as conn:
+        pe_mat = load_pe_matrix(conn, prices.index, list(prices.columns))
+    mom = prices.pct_change(20)
+    signal = ((pe_mat <= 30) & (mom > 0)).astype(float)
+    rets = prices.pct_change().fillna(0)
+    strat_ret = (signal.shift(1) * rets).mean(axis=1)
+    total = float((1 + strat_ret).prod() - 1 - fees)
+    best = {"label": "pe_momentum", "total_return_pct": round(total * 100, 2)}
+    return {"strategy": "pe_momentum", "combos": [best], "best": best, "engine": "vectorbt"}
+
+
+def _run_screening_rebalance(
+    prices: pd.DataFrame,
+    fees: float,
+    screen_run_id: Optional[str],
+) -> Dict[str, Any]:
+    codes = load_codes_by_run_id(screen_run_id) if screen_run_id else []
+    valid = [c for c in codes if c in prices.columns]
+    if not valid:
+        return {
+            "strategy": "screening_rebalance",
+            "combos": [],
+            "best": {"label": "screening_rebalance", "total_return_pct": 0},
+            "engine": "vectorbt",
+            "error": "no_screen_codes",
+        }
+    subset = prices[valid]
+    rets = subset.pct_change().fillna(0).mean(axis=1)
+    total = float((1 + rets).prod() - 1 - fees)
+    best = {"label": "screening_rebalance", "total_return_pct": round(total * 100, 2)}
+    return {"strategy": "screening_rebalance", "combos": [best], "best": best, "engine": "vectorbt"}

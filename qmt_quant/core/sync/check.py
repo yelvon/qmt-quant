@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, List, Optional
 
-from qmt_quant.storage.bars import coverage_stats
+from qmt_quant.storage.bars import coverage_stats, quality_stats
 from qmt_quant.storage.database import db_session, run_migrations
 
 
@@ -51,10 +51,20 @@ def run_data_check(
                 "detail": f"{fin_count} 条每股指标",
             }
         )
+        qstats = quality_stats(conn, adjust_type=adjust_type)
+        checks.append(
+            {
+                "name": "数据质量",
+                "ok": qstats["suspicious_pct"] < 5,
+                "coverage": f"{100 - qstats['suspicious_pct']}%",
+                "detail": f"bad={qstats['bad_bars_count']}, suspicious={qstats['suspicious_bars_count']}",
+            }
+        )
         return {
             "as_of": as_of,
             "adjust_type": adjust_type,
             "checks": checks,
             "bar_coverage_pct": coverage_pct,
+            "quality": qstats,
             "summary_ok": all(c["ok"] for c in checks[:2]),
         }

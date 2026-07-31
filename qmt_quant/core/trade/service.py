@@ -14,6 +14,7 @@ def get_trade_status() -> Dict[str, Any]:
     settings = get_settings()
     trader = QmtTrader()
     connected = trader.connect()
+    positions = trader.query_positions() if connected else []
     with db_session() as conn:
         orders = conn.execute(
             "SELECT * FROM live_order ORDER BY created_at DESC LIMIT 20"
@@ -22,6 +23,8 @@ def get_trade_status() -> Dict[str, Any]:
         "connected": connected,
         "dry_run": settings.dry_run,
         "account_id": settings.account_id,
+        "portfolio_value": trader.portfolio_value() if connected else settings.initial_cash,
+        "positions": positions,
         "recent_orders": [dict(o) for o in orders],
     }
 

@@ -7,6 +7,8 @@ const links = [
   { to: "/validation", label: "④ 仔细验策略" },
   { to: "/screening", label: "⑤ 选股" },
   { to: "/live", label: "⑥ 实盘" },
+  { to: "/jobs", label: "任务记录" },
+  { to: "/settings", label: "设置" },
 ];
 
 export default function Layout() {

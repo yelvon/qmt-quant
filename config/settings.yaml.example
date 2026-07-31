@@ -31,6 +31,9 @@ backtest:
 trade:
   dry_run: true
 
+jobs:
+  inline: true
+
 web:
   host: "127.0.0.1"
   port: 8788

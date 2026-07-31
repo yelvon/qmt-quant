@@ -44,6 +44,7 @@ class ResearchBody(BaseModel):
     short_preset: str = "preset_std"
     long_preset: str = "preset_std"
     fee_preset: str = "default"
+    screen_run_id: Optional[str] = None
 
 
 class ValidateBody(BaseModel):
@@ -52,6 +53,8 @@ class ValidateBody(BaseModel):
     short: int = 20
     long: int = 120
     match: str = "next_open"
+    benchmark: str = "hs300"
+    screen_run_id: Optional[str] = None
 
 
 class ScreenBody(BaseModel):
@@ -59,6 +62,25 @@ class ScreenBody(BaseModel):
     top: int = 30
     sector: str = "沪深A股"
     exclude_st: bool = True
+    pe_max: Optional[float] = None
+    roe_min: Optional[float] = None
+
+
+class ScreenBacktestBody(BaseModel):
+    run_id: str
+    engine: str = "vectorbt"
+    range_preset: str = "3y"
+
+
+class SettingsBody(BaseModel):
+    qmt_install_dir: Optional[str] = None
+    qmt_python: Optional[str] = None
+    quant_python: Optional[str] = None
+    userdata_path: Optional[str] = None
+    account_id: Optional[str] = None
+    dry_run: Optional[bool] = None
+    commission_rate: Optional[float] = None
+    stamp_tax_rate: Optional[float] = None
 
 
 class TradeBody(BaseModel):
@@ -66,6 +88,7 @@ class TradeBody(BaseModel):
     side: str = "buy"
     quantity: int = 100
     live: bool = False
+    confirm: Optional[str] = None
 
 
 class JobManager:
@@ -180,6 +203,7 @@ def create_app() -> FastAPI:
                 "short_preset": body.short_preset,
                 "long_preset": body.long_preset,
                 "fee_preset": body.fee_preset,
+                "screen_run_id": body.screen_run_id,
             },
         )
         return {"job_id": job_id}
@@ -213,6 +237,8 @@ def create_app() -> FastAPI:
                 "short_window": body.short,
                 "long_window": body.long,
                 "match_price": body.match,
+                "benchmark": body.benchmark,
+                "screen_run_id": body.screen_run_id,
             },
         )
         return {"job_id": job_id}
@@ -245,6 +271,22 @@ def create_app() -> FastAPI:
                 "top_n": body.top,
                 "sector": body.sector,
                 "exclude_st": body.exclude_st,
+                "pe_max": body.pe_max,
+                "roe_min": body.roe_min,
+            },
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/screen/backtest")
+    def job_screen_backtest(body: ScreenBacktestBody) -> Dict[str, str]:
+        job_id = submit_job(
+            display_name="选股回测",
+            job_type="screen_backtest",
+            env="quant",
+            params={
+                "run_id": body.run_id,
+                "engine": body.engine,
+                "range_preset": body.range_preset,
             },
         )
         return {"job_id": job_id}
@@ -280,6 +322,8 @@ def create_app() -> FastAPI:
         return [
             {"id": "ma_cross", "label": "双均线"},
             {"id": "buy_hold", "label": "买入持有基准"},
+            {"id": "pe_momentum", "label": "低估值 + 动量"},
+            {"id": "screening_rebalance", "label": "选股调仓"},
         ]
 
     @app.get("/api/options/ranges")
@@ -319,6 +363,59 @@ def create_app() -> FastAPI:
             )
         return out
 
+    @app.get("/api/options/screening-runs")
+    def options_screening_runs() -> List[Dict[str, Any]]:
+        with db_session() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, MAX(as_of_date) AS as_of, COUNT(*) AS cnt, MAX(reason) AS reason
+                FROM screening_result
+                GROUP BY run_id
+                ORDER BY MAX(created_at) DESC
+                LIMIT 30
+                """
+            ).fetchall()
+        return [
+            {"id": r[0], "label": f"{r[3] or '选股'} {r[1]} ({r[2]}只)"}
+            for r in rows
+        ]
+
+    @app.get("/api/screening/{run_id}/codes")
+    def screening_codes(run_id: str) -> Dict[str, List[str]]:
+        from qmt_quant.core.screener.bridge import load_codes_by_run_id
+
+        return {"codes": load_codes_by_run_id(run_id)}
+
+    @app.get("/api/settings")
+    def api_get_settings() -> Dict[str, Any]:
+        s = get_settings()
+        return s.to_dict()
+
+    @app.put("/api/settings")
+    def api_put_settings(body: SettingsBody) -> Dict[str, Any]:
+        s = get_settings()
+        if body.qmt_install_dir is not None:
+            s.qmt_install_dir = body.qmt_install_dir
+        if body.qmt_python is not None:
+            s.qmt_python = body.qmt_python
+        if body.quant_python is not None:
+            s.quant_python = body.quant_python
+        if body.userdata_path is not None:
+            s.userdata_path = body.userdata_path
+        if body.account_id is not None:
+            s.account_id = body.account_id
+        if body.dry_run is not None:
+            s.dry_run = body.dry_run
+        if body.commission_rate is not None:
+            s.commission_rate = body.commission_rate
+        if body.stamp_tax_rate is not None:
+            s.stamp_tax_rate = body.stamp_tax_rate
+        s.save()
+        from qmt_quant import config
+
+        config._settings = None
+        return get_settings().to_dict()
+
     @app.get("/api/trade/status")
     def api_trade_status() -> Dict[str, Any]:
         return get_trade_status()
@@ -329,6 +426,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/trade/submit")
     def api_trade_submit(body: TradeBody) -> List[Dict[str, Any]]:
+        if body.live and body.confirm != "LIVE":
+            return [{"error": "live orders require confirm=LIVE"}]
         orders = preview_signal_orders(body.codes, body.side, body.quantity)
         return submit_orders(orders, live=body.live)
 

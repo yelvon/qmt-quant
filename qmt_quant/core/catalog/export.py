@@ -58,3 +58,23 @@ def load_price_matrix(
     pivot = df.pivot(index="date", columns="code", values="close")
     pivot.index = pd.to_datetime(pivot.index)
     return pivot.sort_index()
+
+
+def load_ohlcv_df(
+    *,
+    adjust_type: str = "front",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    codes: list[str] | None = None,
+) -> pd.DataFrame:
+    with db_session() as conn:
+        df = load_bars_df(
+            conn,
+            codes=codes,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+        )
+    if df.empty:
+        return pd.DataFrame()
+    return df.sort_values(["date", "code"])

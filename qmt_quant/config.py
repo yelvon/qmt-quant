@@ -44,6 +44,7 @@ class Settings:
     match_price: str = "next_open"
     max_weight_per_symbol: float = 0.1
     dry_run: bool = True
+    jobs_inline: bool = True
     web_host: str = "127.0.0.1"
     web_port: int = 8788
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
@@ -61,6 +62,7 @@ class Settings:
         bt = raw.get("backtest", {})
         trade = raw.get("trade", {})
         web = raw.get("web", {})
+        jobs = raw.get("jobs", {})
         return cls(
             qmt_install_dir=qmt.get("install_dir", cls.qmt_install_dir),
             xtquant_site_packages=qmt.get("xtquant_site_packages", ""),
@@ -84,6 +86,7 @@ class Settings:
             match_price=bt.get("match_price", cls.match_price),
             max_weight_per_symbol=float(bt.get("max_weight_per_symbol", cls.max_weight_per_symbol)),
             dry_run=bool(trade.get("dry_run", cls.dry_run)),
+            jobs_inline=bool(jobs.get("inline", cls.jobs_inline)),
             web_host=web.get("host", cls.web_host),
             web_port=int(web.get("port", cls.web_port)),
             _raw=raw,
@@ -100,6 +103,48 @@ class Settings:
     @property
     def catalog_dir(self) -> Path:
         return self.resolve_path(self.parquet_catalog_dir)
+
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "qmt": {
+                "install_dir": self.qmt_install_dir,
+                "xtquant_site_packages": self.xtquant_site_packages,
+                "userdata_path": self.userdata_path,
+                "account_id": self.account_id,
+            },
+            "python": {"qmt_env": self.qmt_python, "quant_env": self.quant_python},
+            "data": {
+                "db_path": self.db_path,
+                "parquet_catalog_dir": self.parquet_catalog_dir,
+                "watchlist_path": self.watchlist_path,
+                "default_sector": self.default_sector,
+                "bar_adjust_type": self.bar_adjust_type,
+                "sync_batch_size": self.sync_batch_size,
+                "auto_export_catalog": self.auto_export_catalog,
+            },
+            "backtest": {
+                "initial_cash": self.initial_cash,
+                "commission_rate": self.commission_rate,
+                "stamp_tax_rate": self.stamp_tax_rate,
+                "min_commission": self.min_commission,
+                "transfer_fee_rate": self.transfer_fee_rate,
+                "slippage_bps": self.slippage_bps,
+                "match_price": self.match_price,
+                "max_weight_per_symbol": self.max_weight_per_symbol,
+            },
+            "trade": {"dry_run": self.dry_run},
+            "jobs": {"inline": self.jobs_inline},
+            "web": {"host": self.web_host, "port": self.web_port},
+        }
+
+    def save(self, path: Path | None = None) -> None:
+        path = path or (ROOT_DIR / "config" / "settings.yaml")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged = self._raw.copy() if self._raw else {}
+        merged.update(self.to_dict())
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(merged, f, allow_unicode=True, default_flow_style=False)
 
 
 _settings: Optional[Settings] = None

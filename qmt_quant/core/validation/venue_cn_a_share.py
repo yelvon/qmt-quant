@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 FillMode = Literal["next_open", "close"]
@@ -12,7 +12,7 @@ FillMode = Literal["next_open", "close"]
 class FeeConfig:
     commission_rate: float = 0.0003
     min_commission: float = 5.0
-    stamp_duty_rate: float = 0.0005  # sell only
+    stamp_duty_rate: float = 0.001  # sell only, matches settings default
     transfer_fee_rate: float = 0.00001  # Shanghai only
 
 
@@ -20,7 +20,7 @@ class FeeConfig:
 class VenueRules:
     lot_size: int = 100
     t_plus_one: bool = True
-    fees: FeeConfig = FeeConfig()
+    fees: FeeConfig = field(default_factory=FeeConfig)
 
 
 def commission(amount: float, fees: FeeConfig) -> float:

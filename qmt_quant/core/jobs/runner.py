@@ -41,6 +41,14 @@ def _python_for_env(env: str) -> str:
     return settings.quant_python or sys.executable
 
 
+def _use_subprocess(env: str) -> bool:
+    settings = get_settings()
+    if settings.jobs_inline:
+        return False
+    py = _python_for_env(env)
+    return py != sys.executable and bool(py)
+
+
 def submit_job(
     *,
     display_name: str,
@@ -73,11 +81,14 @@ def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -
         update_job(conn, job_id, status="running", progress=0.05)
     _notify(job_id, {"status": "running", "progress": 0.05})
     try:
-        handler = _HANDLERS.get(job_type)
-        if handler is None:
-            result = _dispatch_builtin(job_type, params)
+        if _use_subprocess(env):
+            result = _run_subprocess(job_type, env, params)
         else:
-            result = handler(params)
+            handler = _HANDLERS.get(job_type)
+            if handler is None:
+                result = _dispatch_builtin(job_type, params)
+            else:
+                result = handler(params)
         with db_session() as conn:
             update_job(conn, job_id, status="completed", progress=1.0, result=result)
         _notify(job_id, {"status": "completed", "progress": 1.0, "result": result})
@@ -85,6 +96,21 @@ def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -
         with db_session() as conn:
             update_job(conn, job_id, status="failed", progress=1.0, error=str(exc))
         _notify(job_id, {"status": "failed", "progress": 1.0, "error": str(exc)})
+
+
+def _run_subprocess(job_type: str, env: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    py = _python_for_env(env)
+    payload = json.dumps({"job_type": job_type, "params": params}, ensure_ascii=False)
+    proc = subprocess.run(
+        [py, "-m", "qmt_quant.cli._job_worker"],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or f"job failed: {job_type}")
+    return json.loads(proc.stdout or "{}")
 
 
 def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -112,6 +138,14 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.screener.runner import run_screening
 
         return run_screening(**params)
+    if job_type == "screen_backtest":
+        from qmt_quant.core.screener.bridge import run_screen_backtest
+
+        return run_screen_backtest(**params)
+    if job_type == "screen_ic":
+        from qmt_quant.core.screener.ic import compute_factor_ic
+
+        return compute_factor_ic(**params)
     if job_type == "pipeline":
         return run_pipeline(params)
     raise ValueError(f"Unknown job type: {job_type}")

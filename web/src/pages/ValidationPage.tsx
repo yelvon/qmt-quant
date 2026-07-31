@@ -41,10 +41,13 @@ export default function ValidationPage() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/validate", {
       from_run: fromRun || undefined,
       match,
+      benchmark: "hs300",
     });
     setJobId(res.job_id);
     setDetail(null);
   }
+
+  const qs = detail?.quantstats;
 
   return (
     <div>
@@ -76,7 +79,18 @@ export default function ValidationPage() {
           <p className="text-sm text-slate-400">
             收益 {detail.total_return_pct}% · 回撤 {detail.max_drawdown_pct}% · 成交 {detail.trade_count}
           </p>
-          {detail.equity_curve && <EquityChart title="验证净值" equity={detail.equity_curve} />}
+          {qs && (
+            <p className="mt-2 text-sm text-slate-300">
+              夏普 {qs.sharpe ?? "—"} · 胜率 {qs.win_rate_pct ?? "—"}% · 波动 {qs.volatility_pct ?? "—"}%
+            </p>
+          )}
+          {detail.equity_curve && (
+            <EquityChart
+              title="验证净值 vs 沪深300"
+              equity={detail.equity_curve}
+              benchmark={detail.benchmark_curve}
+            />
+          )}
         </div>
       )}
     </div>
