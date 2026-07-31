@@ -111,10 +111,13 @@ def sync_check(
 
 
 @catalog_app.command("export")
-def catalog_export(adjust: str = typer.Option("front")) -> None:
+def catalog_export(
+    adjust: str = typer.Option("front"),
+    fmt: str = typer.Option("flat", help="flat|nt|both"),
+) -> None:
     from qmt_quant.core.catalog.export import export_catalog
 
-    stats = export_catalog(adjust_type=adjust)
+    stats = export_catalog(adjust_type=adjust, fmt=fmt)
     typer.echo(json.dumps(stats, ensure_ascii=False, indent=2))
 
 
@@ -142,6 +145,32 @@ def research_run(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@research_app.command("walk-forward")
+def research_walk_forward(
+    strategy: str = typer.Option("ma_cross"),
+    sector: str = typer.Option("沪深A股"),
+    range_preset: str = typer.Option("3y", help="1y|3y|5y|all"),
+    short_preset: str = typer.Option("preset_std"),
+    long_preset: str = typer.Option("preset_std"),
+    fee_preset: str = typer.Option("default"),
+    train_months: int = typer.Option(12, help="Train window in months (~21 bars/month)"),
+    test_months: int = typer.Option(3, help="Test window in months"),
+) -> None:
+    from qmt_quant.core.research.walk_forward import run_walk_forward_study
+
+    result = run_walk_forward_study(
+        strategy_id=strategy,
+        sector=sector,
+        range_preset=range_preset,
+        short_preset=short_preset,
+        long_preset=long_preset,
+        fee_preset=fee_preset,
+        train_bars=train_months * 21,
+        test_bars=test_months * 21,
+    )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @validate_app.command("run")
 def validate_run(
     from_run: Optional[str] = typer.Option(None, help="Research run id"),
@@ -151,6 +180,7 @@ def validate_run(
     match: str = typer.Option("next_open"),
     benchmark: str = typer.Option("hs300"),
     screen_run_id: Optional[str] = typer.Option(None),
+    engine: Optional[str] = typer.Option(None, help="custom|nautilus"),
 ) -> None:
     from qmt_quant.core.validation.runner import run_validation
 
@@ -162,6 +192,7 @@ def validate_run(
         match_price=match,
         benchmark=benchmark,
         screen_run_id=screen_run_id,
+        engine=engine,
     )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 

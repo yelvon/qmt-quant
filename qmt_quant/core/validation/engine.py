@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable
 
 import pandas as pd
 
+from qmt_quant.config import get_settings
 from qmt_quant.core.validation.backtester import AShareDailyBacktester, ValidationResult
 
 
@@ -59,7 +60,38 @@ class CustomValidationEngine:
         )
 
 
-def get_validation_engine(name: str = "custom", **kwargs) -> ValidationEngine:
-    if name == "nautilus":
-        raise NotImplementedError("NautilusTrader engine planned for Phase 7")
+class NautilusValidationEngine:
+    """NautilusTrader backtest wrapper."""
+
+    def __init__(self, **kwargs) -> None:
+        self._kwargs = kwargs
+
+    def run(
+        self,
+        strategy_id: str,
+        prices: pd.DataFrame,
+        *,
+        ohlcv: pd.DataFrame | None = None,
+        **params,
+    ) -> ValidationResult:
+        from qmt_quant.core.validation.nautilus_runner import run_nautilus_validation
+
+        return run_nautilus_validation(
+            strategy_id=strategy_id,
+            prices=prices,
+            short_window=int(params.get("short_window", 20)),
+            long_window=int(params.get("long_window", 120)),
+            codes=params.get("codes") or list(prices.columns),
+        )
+
+
+def get_validation_engine(name: str | None = None, **kwargs) -> ValidationEngine:
+    engine_name = name or get_settings().validation_engine
+    if engine_name == "nautilus":
+        return NautilusValidationEngine(**kwargs)
     return CustomValidationEngine(**kwargs)
+
+
+def validation_engine_label(name: str | None = None) -> str:
+    engine_name = name or get_settings().validation_engine
+    return "nautilus" if engine_name == "nautilus" else "custom_validator"

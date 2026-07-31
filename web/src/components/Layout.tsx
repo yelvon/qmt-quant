@@ -6,8 +6,10 @@ const links = [
   { to: "/research", label: "③ 快速试策略" },
   { to: "/validation", label: "④ 仔细验策略" },
   { to: "/screening", label: "⑤ 选股" },
+  { to: "/ic", label: "因子 IC" },
   { to: "/live", label: "⑥ 实盘" },
   { to: "/jobs", label: "任务记录" },
+  { to: "/help", label: "帮助" },
   { to: "/settings", label: "设置" },
 ];
 

@@ -11,7 +11,9 @@
 | ③ 快速试策略 | VectorBT 参数扫描（双均线 / 低PE动量 / 选股调仓） |
 | ④ 仔细验策略 | 自研 A 股验证器（T+1/滑点/涨跌停）+ 与 ③ 对比 |
 | ⑤ 选股 | 模板 + 可视化条件 + YAML 规则 |
+| 因子 IC | 因子与未来收益相关性分析 |
 | ⑥ 实盘 | xttrader 连接，默认 dry_run |
+| 帮助 | VectorBT / 验证器 / 双环境说明 |
 | 设置 / 任务记录 | QMT 路径、环境 Python、任务历史 |
 
 ## 双环境安装
@@ -58,13 +60,14 @@ jobs:
 python -m qmt_quant.cli sync bars --incremental
 python -m qmt_quant.cli sync financial
 python -m qmt_quant.cli sync universe
-python -m qmt_quant.cli catalog export
+python -m qmt_quant.cli catalog export --fmt both
 python -m qmt_quant.cli sync check
 
 # 研究 / 验证
 python -m qmt_quant.cli research run --strategy ma_cross --range-preset 3y
-python -m qmt_quant.cli research run --strategy pe_momentum
+python -m qmt_quant.cli research walk-forward --range-preset 3y --train-months 12 --test-months 3
 python -m qmt_quant.cli validate run --from-run <run_id>
+python -m qmt_quant.cli validate run --engine nautilus
 
 # 选股
 python -m qmt_quant.cli screen run --template low_pe
@@ -120,6 +123,8 @@ qmt-quant/
 - [产品需求文档](./docs/需求文档.md)
 - [实施进度](./docs/progress.md)
 - [变更记录](./docs/CHANGELOG.md)
+- [Windows E2E 验收](./docs/windows-e2e.md)
+- [Phase 7 Nautilus MVP](./docs/phase7-nautilus.md)
 - [UI 设计稿](./docs/UI设计稿.md)
 
 ## 测试
@@ -133,4 +138,4 @@ GitHub Actions 在 push/PR 时自动运行 pytest（Linux，无需 QMT）。
 
 ## 验证层说明
 
-当前验证层使用自研 `AShareDailyBacktester`（T+1、滑点、过户费、涨跌停可选），通过 `ValidationEngine` 接口预留 **NautilusTrader** 接入（Phase 7）。
+默认使用自研 `AShareDailyBacktester`（`validation_engine: custom`）。可选 **NautilusTrader MVP**（`validation_engine: nautilus` 或 `--engine nautilus`），详见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)。

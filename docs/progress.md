@@ -7,14 +7,14 @@
 
 | Phase | Milestone | Status |
 |-------|-----------|--------|
-| 1 | Data sync + SQLite + Parquet | In progress |
-| 2 | VectorBT research + QuantStats | In progress |
-| 3a | Custom A-share validator (T+1, fees) | In progress |
-| 3b | NautilusTrader integration | Planned (Phase 7) |
-| 4 | Screening DSL + backtest bridge + IC | In progress |
-| 5 | xttrader live trading | In progress |
-| 6 | Web UI enhancements | In progress |
-| 7 | NautilusTrader + NT Parquet Catalog | Not started |
+| 1 | Data sync + SQLite + Parquet | Done |
+| 2 | VectorBT research + QuantStats | Done |
+| 3a | Custom A-share validator (T+1, fees) | Done |
+| 3b | NautilusTrader integration | In progress (MVP) |
+| 4 | Screening DSL + backtest bridge + IC | Done |
+| 5 | xttrader live trading | Partial |
+| 6 | Web UI enhancements | Done |
+| 7 | NautilusTrader + NT Parquet Catalog | In progress (MVP) |
 
 ## P0 Data Sync (§6.1)
 
@@ -29,7 +29,7 @@
 | DS-012 | Multiple adjust types | Partial (schema supports, sync one at a time) |
 | DS-013 | Standard OHLCV fields | Done |
 | DS-014 | Idempotent upsert | Done |
-| DS-015 | Parquet catalog export | Done (flat format, not NT standard) |
+| DS-015 | Parquet catalog export | Done (flat + NT MVP) |
 | DS-016 | Data quality checks | Done |
 | DS-020 | Financial batch download | Done |
 | DS-021 | Core financial tables | Done |
@@ -49,12 +49,12 @@
 | BT-V-005 | A-share fees | Done |
 | BT-V-006 | Financial factor alignment | Done |
 | BT-V-007 | QuantStats report | Done |
-| BT-V-008 | Walk-Forward | Not started |
-| BT-N-001 | Daily bar validation | Done (custom engine) |
-| BT-N-002 | CN_A_SHARE venue rules | Done (custom engine) |
+| BT-V-008 | Walk-Forward | Done |
+| BT-N-001 | Daily bar validation | Done (custom + nautilus MVP) |
+| BT-N-002 | CN_A_SHARE venue rules | Partial (custom full; nautilus SIM) |
 | BT-N-003 | Fee model | Done |
-| BT-N-004 | Slippage | Done |
-| BT-N-005 | Strategy lifecycle | Partial (custom engine) |
+| BT-N-004 | Slippage | Done (custom) |
+| BT-N-005 | Strategy lifecycle | Partial |
 | BT-N-006 | Anti-lookahead bars | Done |
 | BT-N-007 | Multi-symbol portfolio | Done |
 | BT-N-008 | Performance analysis | Done |
@@ -91,3 +91,15 @@
 | ma_cross | Yes | Yes | Done |
 | pe_momentum | Yes | Yes | Done |
 | screening_rebalance | Yes | Yes | Done |
+
+## Web UI Gaps (五项补齐)
+
+| Item | Status |
+|------|--------|
+| 板块 沪深300/中证500 | Done |
+| 数据页复权 + 历史区间 | Done |
+| 选股 YAML 高级 | Done |
+| IC 分析页 | Done |
+| 帮助页 | Done |
+| Walk-Forward UI | Done |
+| Windows E2E 文档/脚本 | Done |

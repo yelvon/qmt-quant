@@ -8,6 +8,8 @@ import ScreeningPage from "./pages/ScreeningPage";
 import LivePage from "./pages/LivePage";
 import SettingsPage from "./pages/SettingsPage";
 import JobsPage from "./pages/JobsPage";
+import IcPage from "./pages/IcPage";
+import HelpPage from "./pages/HelpPage";
 
 export default function App() {
   return (
@@ -21,6 +23,8 @@ export default function App() {
         <Route path="/live" element={<LivePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/jobs" element={<JobsPage />} />
+        <Route path="/ic" element={<IcPage />} />
+        <Route path="/help" element={<HelpPage />} />
       </Route>
     </Routes>
   );

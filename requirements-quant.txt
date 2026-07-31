@@ -6,6 +6,7 @@ vectorbt>=0.26
 polars>=1.0
 pyarrow>=15.0
 quantstats>=0.0.62
+nautilus_trader>=1.200; python_version>='3.12'
 fastapi>=0.110
 uvicorn[standard]>=0.27
 websockets>=12.0

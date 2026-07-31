@@ -4,8 +4,23 @@ import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
 
+const ADJUST_OPTIONS = [
+  { id: "front", label: "前复权" },
+  { id: "none", label: "不复权" },
+  { id: "back", label: "后复权" },
+];
+
+const RANGE_OPTIONS = [
+  { id: "", label: "增量（近5日）" },
+  { id: "1y", label: "全量 1 年" },
+  { id: "3y", label: "全量 3 年" },
+  { id: "5y", label: "全量 5 年" },
+];
+
 export default function DataPage() {
   const [sector, setSector] = useState("沪深A股");
+  const [adjust, setAdjust] = useState("front");
+  const [rangePreset, setRangePreset] = useState("");
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [check, setCheck] = useState<any>(null);
   const [jobId, setJobId] = useState("");
@@ -29,11 +44,13 @@ export default function DataPage() {
   );
   useJobProgress(onJob);
 
-  async function syncBars() {
+  async function syncBars(incremental: boolean) {
     const res = await apiPost<{ job_id: string }>("/api/jobs/sync/bars", {
       sector,
-      incremental: true,
+      incremental,
       days: 5,
+      adjust,
+      range_preset: incremental ? undefined : rangePreset || undefined,
     });
     setJobId(res.job_id);
   }
@@ -51,11 +68,16 @@ export default function DataPage() {
   return (
     <div>
       <PageCallout>仅下拉/勾选，Primary =「更新今日数据」。同步完成后可导出 Parquet 供验策略使用。</PageCallout>
-      <div className="card grid gap-4 md:grid-cols-2">
+      <div className="card grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <PresetSelect label="股票池" value={sector} options={sectors} onChange={setSector} />
-        <div className="flex items-end gap-2">
-          <button className="btn-primary" onClick={syncBars}>
+        <PresetSelect label="复权" value={adjust} options={ADJUST_OPTIONS} onChange={setAdjust} />
+        <PresetSelect label="历史长度" value={rangePreset} options={RANGE_OPTIONS} onChange={setRangePreset} />
+        <div className="flex flex-wrap items-end gap-2 lg:col-span-3">
+          <button className="btn-primary" onClick={() => syncBars(true)}>
             更新今日数据
+          </button>
+          <button className="btn-secondary" onClick={() => syncBars(false)}>
+            全量同步
           </button>
           <button className="btn-secondary" onClick={syncFinancial}>
             同步财报

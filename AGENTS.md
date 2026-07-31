@@ -14,7 +14,7 @@
   - **qmt-env**（3.8–3.11 + xtquant）：数据同步、xttrader 实盘
   - **quant-env**（3.12+）：VectorBT、Polars、FastAPI、回测/选股/Web
   - 数据交换：**SQLite** + **Parquet**（`data/`），两环境互不污染依赖。
-- **验证层**：当前为自研 `AShareDailyBacktester`（`ValidationEngine` 接口）；**NautilusTrader 为 Phase 7**，勿在本阶段偷偷引入 `nautilus_trader` 除非用户明确要求。
+- **验证层**：默认自研 `AShareDailyBacktester`（`custom_validator`）；**Phase 7 MVP 已启动** — 可选 `nautilus_trader` 引擎 + NT Parquet Catalog（见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)）。
 - **实盘默认 dry_run**；真实下单须 CLI `--confirm LIVE` 或 Web 二次确认。
 
 权威需求：[docs/需求文档.md](./docs/需求文档.md)（v0.3）  

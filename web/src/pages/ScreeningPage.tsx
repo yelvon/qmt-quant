@@ -13,6 +13,8 @@ export default function ScreeningPage() {
   const [roeMin, setRoeMin] = useState(0.1);
   const [topN, setTopN] = useState(30);
   const [excludeSt, setExcludeSt] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [rulePath, setRulePath] = useState("");
   const [templates, setTemplates] = useState<{ id: string; label: string }[]>([]);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [jobId, setJobId] = useState("");
@@ -49,6 +51,7 @@ export default function ScreeningPage() {
       exclude_st: excludeSt,
       pe_max: peMax,
       roe_min: roeMin,
+      rule_path: rulePath || undefined,
     });
     setJobId(res.job_id);
     setResults([]);
@@ -112,6 +115,29 @@ export default function ScreeningPage() {
           排除 ST
         </label>
       </div>
+      <details className="card mt-4" open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
+        <summary className="cursor-pointer font-medium">高级：YAML 规则</summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="label">规则文件路径</label>
+            <input
+              className="input w-full"
+              placeholder="strategies/rules/low_pe_momentum.yaml"
+              value={rulePath}
+              onChange={(e) => setRulePath(e.target.value)}
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setRulePath("strategies/rules/low_pe_momentum.yaml")}
+            >
+              使用 low_pe_momentum 预设
+            </button>
+          </div>
+        </div>
+      </details>
       <button className="btn-primary mt-4" onClick={runScreen}>
         开始选股
       </button>

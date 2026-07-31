@@ -121,4 +121,22 @@ def run_doctor() -> DoctorReport:
             )
         )
 
+    qmt_py_ok = bool(settings.qmt_python) and Path(settings.qmt_python).exists()
+    if not qmt_py_ok:
+        report.checks.append(
+            CheckResult(
+                "qmt_python_for_jobs",
+                False,
+                "WARN: qmt_python not configured — QMT sync jobs may run in quant-env instead of qmt-env",
+            )
+        )
+    else:
+        report.checks.append(
+            CheckResult(
+                "qmt_python_for_jobs",
+                True,
+                settings.qmt_python,
+            )
+        )
+
     return report

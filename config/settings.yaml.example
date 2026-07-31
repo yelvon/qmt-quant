@@ -12,6 +12,8 @@ python:
 data:
   db_path: "data/qmt_quant.db"
   parquet_catalog_dir: "data/catalog"
+  catalog_nt_dir: "data/catalog_nt"
+  export_nt_catalog: false
   watchlist_path: "config/watchlist.txt"
   default_sector: "沪深A股"
   bar_adjust_type: "front"
@@ -27,12 +29,14 @@ backtest:
   slippage_bps: 5
   match_price: "next_open"
   max_weight_per_symbol: 0.1
+  validation_engine: "custom"   # custom | nautilus
 
 trade:
   dry_run: true
 
 jobs:
-  inline: true
+  inline: false
+  force_subprocess_for_qmt: true
 
 web:
   host: "127.0.0.1"

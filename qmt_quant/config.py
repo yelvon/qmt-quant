@@ -43,8 +43,12 @@ class Settings:
     slippage_bps: float = 5.0
     match_price: str = "next_open"
     max_weight_per_symbol: float = 0.1
+    validation_engine: str = "custom"
+    catalog_nt_dir: str = "data/catalog_nt"
+    export_nt_catalog: bool = False
     dry_run: bool = True
-    jobs_inline: bool = True
+    jobs_inline: bool = False
+    jobs_force_subprocess_for_qmt: bool = True
     web_host: str = "127.0.0.1"
     web_port: int = 8788
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
@@ -85,8 +89,14 @@ class Settings:
             slippage_bps=float(bt.get("slippage_bps", cls.slippage_bps)),
             match_price=bt.get("match_price", cls.match_price),
             max_weight_per_symbol=float(bt.get("max_weight_per_symbol", cls.max_weight_per_symbol)),
+            validation_engine=bt.get("validation_engine", cls.validation_engine),
+            catalog_nt_dir=data.get("catalog_nt_dir", cls.catalog_nt_dir),
+            export_nt_catalog=bool(data.get("export_nt_catalog", cls.export_nt_catalog)),
             dry_run=bool(trade.get("dry_run", cls.dry_run)),
             jobs_inline=bool(jobs.get("inline", cls.jobs_inline)),
+            jobs_force_subprocess_for_qmt=bool(
+                jobs.get("force_subprocess_for_qmt", cls.jobs_force_subprocess_for_qmt)
+            ),
             web_host=web.get("host", cls.web_host),
             web_port=int(web.get("port", cls.web_port)),
             _raw=raw,
@@ -105,6 +115,10 @@ class Settings:
         return self.resolve_path(self.parquet_catalog_dir)
 
 
+    @property
+    def catalog_nt_path(self) -> Path:
+        return self.resolve_path(self.catalog_nt_dir)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "qmt": {
@@ -117,6 +131,8 @@ class Settings:
             "data": {
                 "db_path": self.db_path,
                 "parquet_catalog_dir": self.parquet_catalog_dir,
+                "catalog_nt_dir": self.catalog_nt_dir,
+                "export_nt_catalog": self.export_nt_catalog,
                 "watchlist_path": self.watchlist_path,
                 "default_sector": self.default_sector,
                 "bar_adjust_type": self.bar_adjust_type,
@@ -132,9 +148,13 @@ class Settings:
                 "slippage_bps": self.slippage_bps,
                 "match_price": self.match_price,
                 "max_weight_per_symbol": self.max_weight_per_symbol,
+                "validation_engine": self.validation_engine,
             },
             "trade": {"dry_run": self.dry_run},
-            "jobs": {"inline": self.jobs_inline},
+            "jobs": {
+                "inline": self.jobs_inline,
+                "force_subprocess_for_qmt": self.jobs_force_subprocess_for_qmt,
+            },
             "web": {"host": self.web_host, "port": self.web_port},
         }
 

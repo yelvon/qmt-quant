@@ -11,7 +11,7 @@ from qmt_quant.core.catalog.export import load_ohlcv_df, load_price_matrix
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.report import build_quantstats_summary
 from qmt_quant.core.validation.compare import compare_with_research
-from qmt_quant.core.validation.engine import get_validation_engine
+from qmt_quant.core.validation.engine import get_validation_engine, validation_engine_label
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, save_backtest_run
 
@@ -27,6 +27,7 @@ def run_validation(
     range_preset: str = "3y",
     screen_run_id: Optional[str] = None,
     codes: Optional[list[str]] = None,
+    engine: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     settings = get_settings()
@@ -64,17 +65,17 @@ def run_validation(
         end_date=end,
         codes=universe or list(prices.columns),
     )
-    engine = get_validation_engine(
-        match_price=match_price,
-        slippage_bps=settings.slippage_bps,
-    )
+    engine_name = engine or settings.validation_engine
+    validator = get_validation_engine(engine_name, match_price=match_price, slippage_bps=settings.slippage_bps)
     params: Dict[str, Any] = {
         "short_window": short_window,
         "long_window": long_window,
         "screen_run_id": screen_run_id,
+        "codes": universe or list(prices.columns),
     }
-    result = engine.run(strategy_id, prices, ohlcv=ohlcv, **params)
+    result = validator.run(strategy_id, prices, ohlcv=ohlcv, **params)
 
+    engine_label = validation_engine_label(engine_name)
     benchmark_curve = _benchmark_curve(benchmark, start, end)
     comparison = compare_with_research(result.total_return_pct, research_metrics)
     equity_series = {e["date"]: e["equity"] / 100 for e in result.equity_curve}
@@ -95,18 +96,18 @@ def run_validation(
         "equity_curve": result.equity_curve,
         "trades": [t.__dict__ for t in result.trades[:20]],
         "quantstats": quantstats,
-        "engine": "custom_validator",
+        "engine": engine_label,
     }
 
     reports_dir = ROOT_DIR / "reports"
     reports_dir.mkdir(exist_ok=True)
-    out = reports_dir / f"validate_{strategy_id}_{short_window}_{long_window}.json"
+    out = reports_dir / f"validate_{engine_label}_{strategy_id}_{short_window}_{long_window}.json"
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     with db_session() as conn:
         run_id = save_backtest_run(
             conn,
-            engine="nautilus",
+            engine=engine_label,
             strategy_id=strategy_id,
             title=f"validate {strategy_id} {short_window}/{long_window}",
             params={

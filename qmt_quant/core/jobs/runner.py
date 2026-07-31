@@ -43,6 +43,8 @@ def _python_for_env(env: str) -> str:
 
 def _use_subprocess(env: str) -> bool:
     settings = get_settings()
+    if env == "qmt" and settings.jobs_force_subprocess_for_qmt and settings.qmt_python:
+        return True
     if settings.jobs_inline:
         return False
     py = _python_for_env(env)
@@ -130,14 +132,21 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.research.runner import run_research
 
         return run_research(**params)
+    if job_type == "walk_forward":
+        from qmt_quant.core.research.walk_forward import run_walk_forward_study
+
+        return run_walk_forward_study(**params)
     if job_type == "validate":
         from qmt_quant.core.validation.runner import run_validation
 
         return run_validation(**params)
     if job_type == "screen":
+        from qmt_quant.core.screener.dsl import load_rule
         from qmt_quant.core.screener.runner import run_screening
 
-        return run_screening(**params)
+        rule_path = params.pop("rule_path", None)
+        dsl_rule = load_rule(rule_path) if rule_path else None
+        return run_screening(**params, rule=dsl_rule)
     if job_type == "screen_backtest":
         from qmt_quant.core.screener.bridge import run_screen_backtest
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from qmt_quant.config import get_settings
 from qmt_quant.core.doctor import run_doctor
 from qmt_quant.core.jobs.runner import fetch_job, list_recent_jobs, submit_job, subscribe
+from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import (
     FEE_PRESETS,
     LONG_MA_PRESETS,
@@ -30,6 +31,22 @@ class SyncBarsBody(BaseModel):
     incremental: bool = True
     days: int = 5
     adjust: str = "front"
+    range_preset: Optional[str] = None
+
+
+class WalkForwardBody(BaseModel):
+    strategy: str = "ma_cross"
+    sector: str = "沪深A股"
+    range_preset: str = "3y"
+    short_preset: str = "preset_std"
+    long_preset: str = "preset_std"
+    train_months: int = 12
+    test_months: int = 3
+
+
+class ScreenIcBody(BaseModel):
+    template: str = "low_pe"
+    sector: str = "沪深A股"
 
 
 class SyncFinancialBody(BaseModel):
@@ -64,6 +81,7 @@ class ScreenBody(BaseModel):
     exclude_st: bool = True
     pe_max: Optional[float] = None
     roe_min: Optional[float] = None
+    rule_path: Optional[str] = None
 
 
 class ScreenBacktestBody(BaseModel):
@@ -157,16 +175,21 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/sync/bars")
     def job_sync_bars(body: SyncBarsBody) -> Dict[str, str]:
+        params: Dict[str, Any] = {
+            "sector": body.sector,
+            "incremental": body.incremental,
+            "incremental_days": body.days,
+            "adjust_type": body.adjust,
+        }
+        if body.range_preset and not body.incremental:
+            start, _ = resolve_range_preset(body.range_preset)
+            params["start_date"] = start
+            params["incremental"] = False
         job_id = submit_job(
             display_name="更新行情",
             job_type="sync_bars",
             env="qmt",
-            params={
-                "sector": body.sector,
-                "incremental": body.incremental,
-                "incremental_days": body.days,
-                "adjust_type": body.adjust,
-            },
+            params=params,
         )
         return {"job_id": job_id}
 
@@ -204,6 +227,24 @@ def create_app() -> FastAPI:
                 "long_preset": body.long_preset,
                 "fee_preset": body.fee_preset,
                 "screen_run_id": body.screen_run_id,
+            },
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/research/walk-forward")
+    def job_walk_forward(body: WalkForwardBody) -> Dict[str, str]:
+        job_id = submit_job(
+            display_name="Walk-Forward 稳健性",
+            job_type="walk_forward",
+            env="quant",
+            params={
+                "strategy_id": body.strategy,
+                "sector": body.sector,
+                "range_preset": body.range_preset,
+                "short_preset": body.short_preset,
+                "long_preset": body.long_preset,
+                "train_bars": body.train_months * 21,
+                "test_bars": body.test_months * 21,
             },
         )
         return {"job_id": job_id}
@@ -273,7 +314,18 @@ def create_app() -> FastAPI:
                 "exclude_st": body.exclude_st,
                 "pe_max": body.pe_max,
                 "roe_min": body.roe_min,
+                "rule_path": body.rule_path,
             },
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/screen/ic")
+    def job_screen_ic(body: ScreenIcBody) -> Dict[str, str]:
+        job_id = submit_job(
+            display_name="因子 IC 分析",
+            job_type="screen_ic",
+            env="quant",
+            params={"template_id": body.template, "sector": body.sector},
         )
         return {"job_id": job_id}
 
@@ -314,6 +366,8 @@ def create_app() -> FastAPI:
     def options_sectors() -> List[Dict[str, str]]:
         return [
             {"id": "沪深A股", "label": "沪深A股"},
+            {"id": "沪深300", "label": "沪深300"},
+            {"id": "中证500", "label": "中证500"},
             {"id": "watchlist", "label": "我的自选池"},
         ]
 
@@ -359,6 +413,30 @@ def create_app() -> FastAPI:
                     "id": row[0],
                     "label": f"{row[1]} ({metrics.get('label', '')})",
                     "created_at": row[3],
+                }
+            )
+        return out
+
+    @app.get("/api/options/validate-runs")
+    def options_validate_runs() -> List[Dict[str, Any]]:
+        with db_session() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, title, metrics_json, created_at, engine
+                FROM backtest_run
+                WHERE engine IN ('custom_validator', 'nautilus')
+                ORDER BY created_at DESC LIMIT 30
+                """
+            ).fetchall()
+        out = []
+        for row in rows:
+            metrics = json.loads(row[2]) if row[2] else {}
+            out.append(
+                {
+                    "id": row[0],
+                    "label": f"[{row[4]}] {row[1]} ({metrics.get('verdict', '')})",
+                    "created_at": row[3],
+                    "engine": row[4],
                 }
             )
         return out

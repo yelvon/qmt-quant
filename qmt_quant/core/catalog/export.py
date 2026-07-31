@@ -13,29 +13,42 @@ from qmt_quant.storage.bars import load_bars_df
 from qmt_quant.storage.database import db_session, run_migrations
 
 
-def export_catalog(*, adjust_type: str = "front") -> Dict[str, object]:
+def export_catalog(*, adjust_type: str = "front", fmt: str = "flat") -> Dict[str, object]:
+    """Export bars to flat parquet and/or NautilusTrader ParquetDataCatalog."""
     run_migrations()
     settings = get_settings()
-    catalog_dir = settings.catalog_dir
-    catalog_dir.mkdir(parents=True, exist_ok=True)
+    out: Dict[str, object] = {"format": fmt}
 
-    with db_session() as conn:
-        df = load_bars_df(conn, adjust_type=adjust_type)
-    if df.empty:
-        return {"exported": 0, "catalog_dir": str(catalog_dir)}
+    if fmt in ("flat", "both"):
+        catalog_dir = settings.catalog_dir
+        catalog_dir.mkdir(parents=True, exist_ok=True)
 
-    exported = 0
-    meta: Dict[str, object] = {"adjust_type": adjust_type, "instruments": []}
-    for code, group in df.groupby("code"):
-        frame = group.sort_values("date").copy()
-        out = catalog_dir / f"{code.replace('.', '_')}_{adjust_type}.parquet"
-        frame.to_parquet(out, index=False)
-        exported += 1
-        meta["instruments"].append({"code": code, "rows": len(frame), "file": out.name})
+        with db_session() as conn:
+            df = load_bars_df(conn, adjust_type=adjust_type)
+        if df.empty:
+            out["flat"] = {"exported": 0, "catalog_dir": str(catalog_dir)}
+        else:
+            exported = 0
+            meta: Dict[str, object] = {"adjust_type": adjust_type, "instruments": []}
+            for code, group in df.groupby("code"):
+                frame = group.sort_values("date").copy()
+                path = catalog_dir / f"{code.replace('.', '_')}_{adjust_type}.parquet"
+                frame.to_parquet(path, index=False)
+                exported += 1
+                meta["instruments"].append({"code": code, "rows": len(frame), "file": path.name})
 
-    meta_path = catalog_dir / "catalog_meta.json"
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"exported": exported, "catalog_dir": str(catalog_dir), "meta": str(meta_path)}
+            meta_path = catalog_dir / "catalog_meta.json"
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            out["flat"] = {"exported": exported, "catalog_dir": str(catalog_dir), "meta": str(meta_path)}
+
+    if fmt in ("nt", "both") or settings.export_nt_catalog:
+        from qmt_quant.core.catalog.nt_export import export_nt_catalog
+
+        out["nt"] = export_nt_catalog(adjust_type=adjust_type)
+
+    if fmt == "flat" and "flat" in out:
+        return out["flat"]  # type: ignore[return-value]
+    return out
 
 
 def load_price_matrix(

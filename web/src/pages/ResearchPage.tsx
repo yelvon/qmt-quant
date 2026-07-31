@@ -20,6 +20,10 @@ export default function ResearchPage() {
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<any>(null);
   const [runId, setRunId] = useState("");
+  const [wfOpen, setWfOpen] = useState(false);
+  const [wfResult, setWfResult] = useState<any>(null);
+  const [trainMonths, setTrainMonths] = useState(12);
+  const [testMonths, setTestMonths] = useState(3);
 
   useEffect(() => {
     apiGet<any[]>("/api/options/strategies").then(setStrategies);
@@ -34,6 +38,10 @@ export default function ResearchPage() {
       setStatus(String(data.status || ""));
       if (data.status === "completed" && data.result) {
         const r = data.result as any;
+        if (r.segments) {
+          setWfResult(r);
+          return;
+        }
         setRunId(r.run_id);
         if (r.run_id) {
           const detail = await apiGet<any>(`/api/research/${r.run_id}`);
@@ -60,6 +68,19 @@ export default function ResearchPage() {
     nav(`/validation?from=${runId}`);
   }
 
+  async function runWalkForward() {
+    const res = await apiPost<{ job_id: string }>("/api/jobs/research/walk-forward", {
+      strategy,
+      range_preset: range,
+      short_preset: shortP,
+      long_preset: longP,
+      train_months: trainMonths,
+      test_months: testMonths,
+    });
+    setJobId(res.job_id);
+    setWfResult(null);
+  }
+
   const combos = result?.combos || [];
   return (
     <div>
@@ -81,6 +102,37 @@ export default function ResearchPage() {
         )}
       </div>
       {jobId && <JobProgressBar progress={progress} status={status} />}
+      <details className="card mt-4" open={wfOpen} onToggle={(e) => setWfOpen((e.target as HTMLDetailsElement).open)}>
+        <summary className="cursor-pointer font-medium">Walk-Forward 稳健性</summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="label">Train 月数</label>
+            <input
+              className="input w-full"
+              type="number"
+              value={trainMonths}
+              onChange={(e) => setTrainMonths(Number(e.target.value))}
+            />
+          </div>
+          <div>
+            <label className="label">Test 月数</label>
+            <input
+              className="input w-full"
+              type="number"
+              value={testMonths}
+              onChange={(e) => setTestMonths(Number(e.target.value))}
+            />
+          </div>
+        </div>
+        <button className="btn-secondary mt-3" onClick={runWalkForward}>
+          运行 Walk-Forward
+        </button>
+        {wfResult?.segments && (
+          <p className="mt-2 text-sm text-emerald-400">
+            稳健性 {wfResult.stability_score} · {wfResult.segment_count} 段
+          </p>
+        )}
+      </details>
       {combos.length > 0 && (
         <div className="card mt-4">
           <EquityChart
