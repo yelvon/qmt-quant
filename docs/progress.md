@@ -103,3 +103,18 @@
 | 帮助页 | Done |
 | Walk-Forward UI | Done |
 | Windows E2E 文档/脚本 | Done |
+
+## Web UX 优化（交互体验计划）
+
+| Item | Status |
+|------|--------|
+| 导航 ①–⑥ + 次要入口 | Done |
+| 总览行动卡片 + onboarding | Done |
+| 数据健康人话面板 | Done |
+| ④ ③vs④ 对比 + CTA | Done |
+| 任务错误人话 + 重试 | Done |
+| Pipeline 分步进度 | Done |
+| IC/订单/选股表格化 | Done |
+| 设置页 doctor 检测 | Done |
+| WF OOS 柱状图 | Done |
+| 空状态 + 技术详情折叠 | Done |

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,7 @@ from qmt_quant.core.sync.check import run_data_check
 from qmt_quant.core.trade.service import get_trade_status, preview_signal_orders, submit_orders
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, list_jobs
+from qmt_quant.web.status_helpers import build_status_actions
 
 
 class SyncBarsBody(BaseModel):
@@ -158,15 +159,32 @@ def create_app() -> FastAPI:
         doctor = run_doctor()
         check = run_data_check()
         jobs = list_recent_jobs(5)
+        coverage = float(check.get("bar_coverage_pct", 0) or 0)
         suggestion = "更新今日数据"
-        if check.get("bar_coverage_pct", 0) > 80:
+        if coverage > 80:
             suggestion = "快速试策略"
+        checks = [c.__dict__ for c in doctor.checks]
+        actions = build_status_actions(
+            doctor_ok=doctor.ok,
+            checks=checks,
+            bar_coverage_pct=coverage,
+        )
         return {
             "doctor_ok": doctor.ok,
-            "checks": [c.__dict__ for c in doctor.checks],
+            "checks": checks,
             "data_check": check,
             "recent_jobs": jobs,
             "suggestion": suggestion,
+            "actions": actions,
+            "onboarding_complete": doctor.ok and coverage > 80,
+        }
+
+    @app.get("/api/doctor")
+    def api_doctor() -> Dict[str, Any]:
+        doctor = run_doctor()
+        return {
+            "ok": doctor.ok,
+            "checks": [c.__dict__ for c in doctor.checks],
         }
 
     @app.get("/api/data/check")
@@ -357,6 +375,19 @@ def create_app() -> FastAPI:
     def api_job(job_id: str) -> Dict[str, Any]:
         job = fetch_job(job_id)
         return job or {"error": "not_found"}
+
+    @app.post("/api/jobs/{job_id}/retry")
+    def api_job_retry(job_id: str) -> Dict[str, str]:
+        job = fetch_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="not_found")
+        new_id = submit_job(
+            display_name=job.get("display_name", "重试任务"),
+            job_type=job.get("job_type", ""),
+            env=job.get("env", "quant"),
+            params=job.get("params_json") or {},
+        )
+        return {"job_id": new_id}
 
     @app.get("/api/jobs")
     def api_jobs(limit: int = 20) -> List[Dict[str, Any]]:

@@ -27,6 +27,15 @@ def test_status(client):
     data = res.json()
     assert "doctor_ok" in data
     assert "suggestion" in data
+    assert "actions" in data
+    assert isinstance(data["actions"], list)
+    assert "onboarding_complete" in data
+
+
+def test_doctor(client):
+    res = client.get("/api/doctor")
+    assert res.status_code == 200
+    assert "checks" in res.json()
 
 
 def test_options(client):

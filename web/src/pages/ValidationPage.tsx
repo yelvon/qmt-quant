@@ -5,6 +5,9 @@ import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
 import EquityChart from "../components/EquityChart";
+import ComparisonCard from "../components/ComparisonCard";
+import EmptyState from "../components/EmptyState";
+import TechnicalDetails from "../components/TechnicalDetails";
 
 export default function ValidationPage() {
   const [params] = useSearchParams();
@@ -14,6 +17,7 @@ export default function ValidationPage() {
   const [jobId, setJobId] = useState("");
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("");
+  const [jobError, setJobError] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
 
   useEffect(() => {
@@ -25,7 +29,9 @@ export default function ValidationPage() {
       if (data.job_id !== jobId) return;
       setProgress(Number(data.progress || 0));
       setStatus(String(data.status || ""));
+      if (data.error) setJobError(String(data.error));
       if (data.status === "completed" && data.result) {
+        setJobError(null);
         const r = data.result as any;
         if (r.run_id) {
           const v = await apiGet<any>(`/api/validate/${r.run_id}`);
@@ -45,6 +51,7 @@ export default function ValidationPage() {
     });
     setJobId(res.job_id);
     setDetail(null);
+    setJobError(null);
   }
 
   const qs = detail?.quantstats;
@@ -54,7 +61,7 @@ export default function ValidationPage() {
       <PageCallout>仔细验策略：A 股 T+1、整手、费率规则。与 ③ 对比，给出「可以采用 / 建议复核」。</PageCallout>
       <div className="card grid gap-3 md:grid-cols-2">
         <PresetSelect
-          label="来自研究 run"
+          label="选择③的结果"
           value={fromRun}
           options={[{ id: "", label: "手动参数" }, ...runs]}
           onChange={setFromRun}
@@ -72,25 +79,51 @@ export default function ValidationPage() {
       <button className="btn-primary mt-4" onClick={runValidate}>
         开始验证
       </button>
-      {jobId && <JobProgressBar progress={progress} status={status} />}
+      {jobId && (
+        <JobProgressBar
+          progress={progress}
+          status={status}
+          error={jobError}
+          completeAction={
+            status === "completed" && detail?.verdict === "可以采用"
+              ? { label: "去模拟下单", to: "/live" }
+              : undefined
+          }
+        />
+      )}
+      {!detail && !jobId && (
+        <EmptyState
+          title="还没有验证结果"
+          description="请先从③快速试策略，再送到本页验证；或选择已有研究记录。"
+          actionLabel="去快速试策略"
+          actionTo="/research"
+        />
+      )}
       {detail && (
-        <div className="card mt-4">
-          <p className="text-lg font-medium text-emerald-400">结论：{detail.verdict}</p>
-          <p className="text-sm text-slate-400">
-            收益 {detail.total_return_pct}% · 回撤 {detail.max_drawdown_pct}% · 成交 {detail.trade_count}
-          </p>
-          {qs && (
-            <p className="mt-2 text-sm text-slate-300">
-              夏普 {qs.sharpe ?? "—"} · 胜率 {qs.win_rate_pct ?? "—"}% · 波动 {qs.volatility_pct ?? "—"}%
+        <div className="mt-4 space-y-4">
+          <ComparisonCard
+            comparison={detail.comparison}
+            verdict={detail.verdict}
+            totalReturnPct={detail.total_return_pct}
+          />
+          <div className="card">
+            <p className="text-sm text-slate-400">
+              回撤 {detail.max_drawdown_pct}% · 成交 {detail.trade_count} 笔
             </p>
-          )}
-          {detail.equity_curve && (
-            <EquityChart
-              title="验证净值 vs 沪深300"
-              equity={detail.equity_curve}
-              benchmark={detail.benchmark_curve}
-            />
-          )}
+            {qs && (
+              <p className="mt-2 text-sm text-slate-300">
+                夏普 {qs.sharpe ?? "—"} · 胜率 {qs.win_rate_pct ?? "—"}% · 波动 {qs.volatility_pct ?? "—"}%
+              </p>
+            )}
+            {detail.equity_curve && (
+              <EquityChart
+                title="验证净值 vs 沪深300"
+                equity={detail.equity_curve}
+                benchmark={detail.benchmark_curve}
+              />
+            )}
+            <TechnicalDetails data={detail} />
+          </div>
         </div>
       )}
     </div>

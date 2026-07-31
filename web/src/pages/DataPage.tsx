@@ -3,6 +3,7 @@ import { apiGet, apiPost, useJobProgress } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
+import DataHealthPanel from "../components/DataHealthPanel";
 
 const ADJUST_OPTIONS = [
   { id: "front", label: "前复权" },
@@ -26,6 +27,7 @@ export default function DataPage() {
   const [jobId, setJobId] = useState("");
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("");
+  const [jobError, setJobError] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
@@ -37,7 +39,11 @@ export default function DataPage() {
       if (data.job_id === jobId) {
         setProgress(Number(data.progress || 0));
         setStatus(String(data.status || ""));
-        if (data.status === "completed") apiGet("/api/data/check").then(setCheck);
+        if (data.error) setJobError(String(data.error));
+        if (data.status === "completed") {
+          apiGet("/api/data/check").then(setCheck);
+          setJobError(null);
+        }
       }
     },
     [jobId]
@@ -53,6 +59,7 @@ export default function DataPage() {
       range_preset: incremental ? undefined : rangePreset || undefined,
     });
     setJobId(res.job_id);
+    setJobError(null);
   }
 
   async function syncFinancial() {
@@ -86,11 +93,18 @@ export default function DataPage() {
             导出验策略文件
           </button>
         </div>
-        {jobId && <JobProgressBar progress={progress} status={status} />}
+        {jobId && (
+          <JobProgressBar
+            progress={progress}
+            status={status}
+            error={jobError}
+            completeAction={status === "completed" ? { label: "去试策略", to: "/research" } : undefined}
+          />
+        )}
       </div>
       <div className="card mt-4">
-        <h2 className="mb-2 font-medium">数据健康</h2>
-        <pre className="overflow-auto text-xs text-slate-400">{JSON.stringify(check, null, 2)}</pre>
+        <h2 className="mb-3 font-medium">数据健康</h2>
+        <DataHealthPanel check={check} />
       </div>
     </div>
   );

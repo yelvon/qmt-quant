@@ -1,14 +1,27 @@
 import React, { useEffect, useState } from "react";
 import { apiGet, apiPut } from "../lib/api";
 import PageCallout from "../components/PageCallout";
+import StatusBadge from "../components/StatusBadge";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<any>({});
   const [saved, setSaved] = useState(false);
+  const [doctor, setDoctor] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     apiGet("/api/settings").then(setSettings);
   }, []);
+
+  async function runDoctor() {
+    setChecking(true);
+    try {
+      const res = await apiGet<any>("/api/doctor");
+      setDoctor(res);
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function save() {
     await apiPut("/api/settings", {
@@ -23,6 +36,7 @@ export default function SettingsPage() {
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    await runDoctor();
   }
 
   function patch(path: string[], value: string | boolean | number) {
@@ -40,7 +54,7 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <PageCallout>设置页：QMT 路径与 Python 环境只需配置一次，数据页只显示状态。</PageCallout>
+      <PageCallout>设置页：QMT 路径与 Python 环境只需配置一次，保存后自动检测。</PageCallout>
       <div className="card space-y-4">
         <div>
           <label className="label">QMT 安装目录</label>
@@ -90,11 +104,32 @@ export default function SettingsPage() {
           />
           默认模拟下单
         </label>
-        <button className="btn-primary" onClick={save}>
-          保存设置
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-primary" onClick={save}>
+            保存设置
+          </button>
+          <button type="button" className="btn-secondary" disabled={checking} onClick={runDoctor}>
+            {checking ? "检测中…" : "检测环境"}
+          </button>
+        </div>
         {saved && <p className="text-sm text-emerald-400">已保存</p>}
       </div>
+      {doctor && (
+        <div className="card mt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-medium">环境检测</h2>
+            <StatusBadge ok={doctor.ok} label={doctor.ok ? "全部通过" : "有问题"} />
+          </div>
+          <ul className="space-y-2">
+            {(doctor.checks || []).map((c: any) => (
+              <li key={c.name} className="flex items-start justify-between gap-2 text-sm">
+                <span className="text-slate-400">{c.name}</span>
+                <span className="text-right text-slate-300">{c.message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,12 @@ import { apiGet, apiPost, useJobProgress } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
+import EmptyState from "../components/EmptyState";
+
+const RULE_PRESETS = [
+  { id: "", label: "使用上方模板（默认）" },
+  { id: "strategies/rules/low_pe_momentum.yaml", label: "低估值动量 YAML" },
+];
 
 export default function ScreeningPage() {
   const nav = useNavigate();
@@ -13,13 +19,13 @@ export default function ScreeningPage() {
   const [roeMin, setRoeMin] = useState(0.1);
   const [topN, setTopN] = useState(30);
   const [excludeSt, setExcludeSt] = useState(true);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [rulePath, setRulePath] = useState("");
   const [templates, setTemplates] = useState<{ id: string; label: string }[]>([]);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [jobId, setJobId] = useState("");
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("");
+  const [jobError, setJobError] = useState<string | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [runId, setRunId] = useState("");
 
@@ -33,7 +39,9 @@ export default function ScreeningPage() {
       if (data.job_id !== jobId) return;
       setProgress(Number(data.progress || 0));
       setStatus(String(data.status || ""));
+      if (data.error) setJobError(String(data.error));
       if (data.status === "completed" && data.result) {
+        setJobError(null);
         const r = data.result as any;
         setResults(r.results || []);
         setRunId(r.run_id || "");
@@ -115,33 +123,24 @@ export default function ScreeningPage() {
           排除 ST
         </label>
       </div>
-      <details className="card mt-4" open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
+      <details className="card mt-4">
         <summary className="cursor-pointer font-medium">高级：YAML 规则</summary>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="label">规则文件路径</label>
-            <input
-              className="input w-full"
-              placeholder="strategies/rules/low_pe_momentum.yaml"
-              value={rulePath}
-              onChange={(e) => setRulePath(e.target.value)}
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setRulePath("strategies/rules/low_pe_momentum.yaml")}
-            >
-              使用 low_pe_momentum 预设
-            </button>
-          </div>
+        <div className="mt-3">
+          <PresetSelect
+            label="规则预设"
+            value={rulePath}
+            options={RULE_PRESETS}
+            onChange={setRulePath}
+          />
         </div>
       </details>
       <button className="btn-primary mt-4" onClick={runScreen}>
         开始选股
       </button>
-      {jobId && <JobProgressBar progress={progress} status={status} />}
+      {jobId && <JobProgressBar progress={progress} status={status} error={jobError} />}
+      {!results.length && !jobId && (
+        <EmptyState title="还没有选股结果" description="选择模板与条件后点击「开始选股」。" />
+      )}
       {runId && (
         <div className="mt-4 flex gap-2">
           <button className="btn-secondary" onClick={sendToResearch}>
@@ -158,6 +157,7 @@ export default function ScreeningPage() {
             <thead className="text-slate-400">
               <tr>
                 <th className="p-2">代码</th>
+                <th>名称</th>
                 <th>PE</th>
                 <th>ROE</th>
                 <th>得分</th>
@@ -167,6 +167,7 @@ export default function ScreeningPage() {
               {results.map((r) => (
                 <tr key={r.code} className="border-t border-slate-800">
                   <td className="p-2">{r.code}</td>
+                  <td>{r.name || "—"}</td>
                   <td>{r.pe}</td>
                   <td>{r.roe}</td>
                   <td>{r.score}</td>

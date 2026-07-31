@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Web UX 优化：导航重组（①–⑥ 主流程 + 次要入口）、总览行动卡片、首次引导 checklist
+- 共享组件：DataHealthPanel、ComparisonCard、StepProgress、ActionCard、EmptyState、TechnicalDetails
+- `/api/status` 扩展 `actions` / `onboarding_complete`；`GET /api/doctor`；`POST /api/jobs/{id}/retry`
+- Pipeline 分步进度推送（sync → catalog → research → validate）
+- 任务失败人话映射（errorMessages.ts）；JobProgressBar 失败引导与完成 CTA
 - Walk-Forward 研究模块（BT-V-008）：`research walk-forward` CLI、Web job、测试
 - Phase 7 Nautilus MVP：`nautilus_trader` 可选依赖、NT Parquet Catalog 导出、`NautilusValidationEngine`
 - Web：沪深300/中证500 板块、数据页复权/全量区间、选股 YAML 高级、IC 页、帮助页、Walk-Forward 折叠区
@@ -24,6 +29,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Web：③ 补股票池；④ ③vs④ 对比卡；数据健康/IC/订单/任务记录表格化；设置页环境检测
 - `settings.yaml.example`：`jobs.inline: false`；新增 `validation_engine`、`catalog_nt_dir`
 - `catalog export --fmt flat|nt|both` 支持 NT Catalog
 - `validate run --engine nautilus` CLI 覆盖

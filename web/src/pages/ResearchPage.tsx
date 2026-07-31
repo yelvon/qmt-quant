@@ -5,19 +5,23 @@ import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
 import EquityChart from "../components/EquityChart";
+import EmptyState from "../components/EmptyState";
 
 export default function ResearchPage() {
   const nav = useNavigate();
   const [strategy, setStrategy] = useState("ma_cross");
+  const [sector, setSector] = useState("沪深A股");
   const [range, setRange] = useState("3y");
   const [shortP, setShortP] = useState("preset_std");
   const [longP, setLongP] = useState("preset_std");
   const [strategies, setStrategies] = useState<{ id: string; label: string }[]>([]);
+  const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [ranges, setRanges] = useState<{ id: string; label: string }[]>([]);
   const [ma, setMa] = useState<{ short: any[]; long: any[] }>({ short: [], long: [] });
   const [jobId, setJobId] = useState("");
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("");
+  const [jobError, setJobError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [runId, setRunId] = useState("");
   const [wfOpen, setWfOpen] = useState(false);
@@ -27,6 +31,7 @@ export default function ResearchPage() {
 
   useEffect(() => {
     apiGet<any[]>("/api/options/strategies").then(setStrategies);
+    apiGet<any[]>("/api/options/sectors").then(setSectors);
     apiGet<any[]>("/api/options/ranges").then(setRanges);
     apiGet<any>("/api/options/ma-presets").then(setMa);
   }, []);
@@ -36,7 +41,9 @@ export default function ResearchPage() {
       if (data.job_id !== jobId) return;
       setProgress(Number(data.progress || 0));
       setStatus(String(data.status || ""));
+      if (data.error) setJobError(String(data.error));
       if (data.status === "completed" && data.result) {
+        setJobError(null);
         const r = data.result as any;
         if (r.segments) {
           setWfResult(r);
@@ -56,12 +63,14 @@ export default function ResearchPage() {
   async function runResearch() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/research", {
       strategy,
+      sector,
       range_preset: range,
       short_preset: shortP,
       long_preset: longP,
     });
     setJobId(res.job_id);
     setResult(null);
+    setJobError(null);
   }
 
   function sendToValidation() {
@@ -71,6 +80,7 @@ export default function ResearchPage() {
   async function runWalkForward() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/research/walk-forward", {
       strategy,
+      sector,
       range_preset: range,
       short_preset: shortP,
       long_preset: longP,
@@ -82,11 +92,14 @@ export default function ResearchPage() {
   }
 
   const combos = result?.combos || [];
+  const wfSegments = wfResult?.segments || [];
+
   return (
     <div>
       <PageCallout>快速试策略：选预设参数包扫描，看热力图与最优组合。满意后送到 ④ 仔细验。</PageCallout>
-      <div className="card grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <div className="card grid gap-3 md:grid-cols-2 lg:grid-cols-5">
         <PresetSelect label="策略" value={strategy} options={strategies} onChange={setStrategy} />
+        <PresetSelect label="股票池" value={sector} options={sectors} onChange={setSector} />
         <PresetSelect label="区间" value={range} options={ranges} onChange={setRange} />
         <PresetSelect label="短均线包" value={shortP} options={ma.short} onChange={setShortP} />
         <PresetSelect label="长均线包" value={longP} options={ma.long} onChange={setLongP} />
@@ -101,9 +114,23 @@ export default function ResearchPage() {
           </button>
         )}
       </div>
-      {jobId && <JobProgressBar progress={progress} status={status} />}
+      {jobId && (
+        <JobProgressBar
+          progress={progress}
+          status={status}
+          error={jobError}
+          completeAction={
+            status === "completed" && runId
+              ? { label: "送到仔细验策略", onClick: sendToValidation }
+              : undefined
+          }
+        />
+      )}
       <details className="card mt-4" open={wfOpen} onToggle={(e) => setWfOpen((e.target as HTMLDetailsElement).open)}>
         <summary className="cursor-pointer font-medium">Walk-Forward 稳健性</summary>
+        <p className="mt-2 text-sm text-slate-400">
+          在 train 段选最优参数，在 test 段看样本外收益。stability 越高说明越稳健，避免过拟合。
+        </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <div>
             <label className="label">Train 月数</label>
@@ -127,12 +154,27 @@ export default function ResearchPage() {
         <button className="btn-secondary mt-3" onClick={runWalkForward}>
           运行 Walk-Forward
         </button>
-        {wfResult?.segments && (
+        {wfResult?.segment_count != null && (
           <p className="mt-2 text-sm text-emerald-400">
             稳健性 {wfResult.stability_score} · {wfResult.segment_count} 段
           </p>
         )}
+        {wfSegments.length > 0 && (
+          <div className="mt-4">
+            <EquityChart
+              title="各段样本外收益 (OOS %)"
+              categories={wfSegments.map((s: any) => `${s.test_start}`)}
+              values={wfSegments.map((s: any) => s.oos_return_pct)}
+            />
+          </div>
+        )}
       </details>
+      {combos.length === 0 && !jobId && (
+        <EmptyState
+          title="还没有扫描结果"
+          description="选择策略与参数预设后点击「开始扫描」。"
+        />
+      )}
       {combos.length > 0 && (
         <div className="card mt-4">
           <EquityChart

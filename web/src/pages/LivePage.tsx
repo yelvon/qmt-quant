@@ -2,10 +2,13 @@ import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
+import TechnicalDetails from "../components/TechnicalDetails";
 
 export default function LivePage() {
   const [trade, setTrade] = useState<any>(null);
   const [codes, setCodes] = useState("600519.SH");
+  const [codeList, setCodeList] = useState<string[]>(["600519.SH"]);
+  const [editCodes, setEditCodes] = useState(false);
   const [dryRun, setDryRun] = useState(true);
   const [orders, setOrders] = useState<any[]>([]);
   const [screenRuns, setScreenRuns] = useState<{ id: string; label: string }[]>([]);
@@ -17,22 +20,23 @@ export default function LivePage() {
     apiGet<any[]>("/api/options/screening-runs").then(setScreenRuns);
   }, []);
 
-  async function loadScreenCodes(runId: string) {
-    const rows = await apiGet<any[]>(`/api/options/screening-runs`);
-    const run = rows.find((r) => r.id === runId);
-    if (!run) return;
-    setSignalSource(runId);
-  }
-
   useEffect(() => {
     if (signalSource === "manual") return;
     apiGet<{ codes: string[] }>(`/api/screening/${signalSource}/codes`).then((data) => {
-      if (data.codes?.length) setCodes(data.codes.join(","));
+      if (data.codes?.length) {
+        setCodeList(data.codes);
+        setCodes(data.codes.join(","));
+        setEditCodes(false);
+      }
     });
   }, [signalSource]);
 
+  function parseCodes(): string[] {
+    return codes.split(",").map((c) => c.trim()).filter(Boolean);
+  }
+
   async function preview() {
-    const list = codes.split(",").map((c) => c.trim()).filter(Boolean);
+    const list = parseCodes();
     const res = await apiPost<any[]>("/api/trade/preview", {
       codes: list,
       side: "buy",
@@ -46,7 +50,7 @@ export default function LivePage() {
       setShowConfirm(true);
       return;
     }
-    const list = codes.split(",").map((c) => c.trim()).filter(Boolean);
+    const list = parseCodes();
     const res = await apiPost<any[]>("/api/trade/submit", {
       codes: list,
       side: "buy",
@@ -58,6 +62,8 @@ export default function LivePage() {
     setShowConfirm(false);
     apiGet("/api/trade/status").then(setTrade);
   }
+
+  const displayCodes = signalSource !== "manual" && !editCodes ? codeList : parseCodes();
 
   return (
     <div>
@@ -75,13 +81,29 @@ export default function LivePage() {
           ]}
           onChange={(v) => {
             setSignalSource(v);
-            if (v !== "manual") loadScreenCodes(v);
+            if (v === "manual") setEditCodes(true);
           }}
         />
-        <div>
-          <label className="label">代码（逗号分隔）</label>
-          <input className="input w-full" value={codes} onChange={(e) => setCodes(e.target.value)} />
-        </div>
+        {signalSource !== "manual" && !editCodes ? (
+          <div>
+            <label className="label">标的（来自选股结果）</label>
+            <div className="flex flex-wrap gap-2">
+              {displayCodes.map((c) => (
+                <span key={c} className="rounded-full bg-slate-800 px-3 py-1 text-sm text-slate-300">
+                  {c}
+                </span>
+              ))}
+            </div>
+            <button type="button" className="mt-2 text-xs text-slate-500 hover:text-slate-300" onClick={() => setEditCodes(true)}>
+              手动编辑
+            </button>
+          </div>
+        ) : (
+          <div>
+            <label className="label">代码（逗号分隔）</label>
+            <input className="input w-full" value={codes} onChange={(e) => setCodes(e.target.value)} />
+          </div>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
           模拟下单（推荐）
@@ -109,8 +131,28 @@ export default function LivePage() {
         </div>
       )}
       {orders.length > 0 && (
-        <div className="card mt-4">
-          <pre className="text-xs text-slate-400">{JSON.stringify(orders, null, 2)}</pre>
+        <div className="card mt-4 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-slate-400">
+              <tr>
+                <th className="p-2">代码</th>
+                <th>方向</th>
+                <th>数量</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o, i) => (
+                <tr key={i} className="border-t border-slate-800">
+                  <td className="p-2">{o.code || o.symbol || "—"}</td>
+                  <td>{o.side || "buy"}</td>
+                  <td>{o.quantity ?? o.volume ?? "—"}</td>
+                  <td>{o.status || o.dry_run ? "模拟" : "已提交"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <TechnicalDetails data={orders} />
         </div>
       )}
     </div>

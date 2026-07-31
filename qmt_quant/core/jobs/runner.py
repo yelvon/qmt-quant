@@ -88,7 +88,10 @@ def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -
         else:
             handler = _HANDLERS.get(job_type)
             if handler is None:
-                result = _dispatch_builtin(job_type, params)
+                if job_type == "pipeline":
+                    result = run_pipeline(params, job_id=job_id)
+                else:
+                    result = _dispatch_builtin(job_type, params)
             else:
                 result = handler(params)
         with db_session() as conn:
@@ -155,27 +158,51 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.screener.ic import compute_factor_ic
 
         return compute_factor_ic(**params)
-    if job_type == "pipeline":
-        return run_pipeline(params)
     raise ValueError(f"Unknown job type: {job_type}")
 
 
-def run_pipeline(params: Dict[str, Any]) -> Dict[str, Any]:
+def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[str, Any]:
     from qmt_quant.core.catalog.export import export_catalog
     from qmt_quant.core.research.runner import run_research
     from qmt_quant.core.sync.bars import sync_bars
     from qmt_quant.core.validation.runner import run_validation
 
+    def _step(progress: float, step: str, step_label: str) -> None:
+        if not job_id:
+            return
+        with db_session() as conn:
+            update_job(conn, job_id, progress=progress)
+        _notify(
+            job_id,
+            {"status": "running", "progress": progress, "step": step, "step_label": step_label},
+        )
+
     out: Dict[str, Any] = {}
-    out["sync"] = sync_bars(incremental=True, incremental_days=params.get("days", 5))
-    if get_settings().auto_export_catalog:
-        out["catalog"] = export_catalog()
-    out["research"] = run_research(
-        strategy_id=params.get("strategy", "ma_cross"),
-        range_preset=params.get("range_preset", "3y"),
-    )
-    research_id = out["research"].get("run_id")
-    out["validate"] = run_validation(from_run_id=research_id)
+    try:
+        _step(0.1, "sync", "更新数据")
+        out["sync"] = sync_bars(incremental=True, incremental_days=params.get("days", 5))
+    except Exception as exc:
+        raise RuntimeError(f"[sync] {exc}") from exc
+    try:
+        if get_settings().auto_export_catalog:
+            _step(0.35, "catalog", "导出验策略文件")
+            out["catalog"] = export_catalog()
+    except Exception as exc:
+        raise RuntimeError(f"[catalog] {exc}") from exc
+    try:
+        _step(0.55, "research", "快速试策略")
+        out["research"] = run_research(
+            strategy_id=params.get("strategy", "ma_cross"),
+            range_preset=params.get("range_preset", "3y"),
+        )
+    except Exception as exc:
+        raise RuntimeError(f"[research] {exc}") from exc
+    try:
+        research_id = out["research"].get("run_id")
+        _step(0.8, "validate", "仔细验策略")
+        out["validate"] = run_validation(from_run_id=research_id)
+    except Exception as exc:
+        raise RuntimeError(f"[validate] {exc}") from exc
     return out
 
 
