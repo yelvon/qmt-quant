@@ -24,6 +24,7 @@ def _find_settings_path() -> Path:
 class Settings:
     qmt_install_dir: str = r"C:\qmt"
     xtquant_site_packages: str = ""
+    xtquant_port: int = 58610
     userdata_path: str = ""
     account_id: str = ""
     qmt_python: str = ""
@@ -70,6 +71,7 @@ class Settings:
         return cls(
             qmt_install_dir=qmt.get("install_dir", cls.qmt_install_dir),
             xtquant_site_packages=qmt.get("xtquant_site_packages", ""),
+            xtquant_port=int(qmt.get("xtquant_port", cls.xtquant_port)),
             userdata_path=qmt.get("userdata_path", ""),
             account_id=qmt.get("account_id", ""),
             qmt_python=py.get("qmt_env", os.environ.get("QMT_PYTHON", "")),
@@ -124,6 +126,7 @@ class Settings:
             "qmt": {
                 "install_dir": self.qmt_install_dir,
                 "xtquant_site_packages": self.xtquant_site_packages,
+                "xtquant_port": self.xtquant_port,
                 "userdata_path": self.userdata_path,
                 "account_id": self.account_id,
             },

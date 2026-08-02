@@ -54,8 +54,11 @@ def sync_universe(sector: str | None = None) -> int:
     client = XtDataClient()
     with db_session() as conn:
         for code in codes:
-            detail = client.get_instrument_detail(code)
-            name = detail.get("InstrumentName") or detail.get("name") or ""
+            try:
+                detail = client.get_instrument_detail(code)
+            except Exception:
+                detail = {}
+            name = detail.get("InstrumentName") or detail.get("name") or code.split(".")[0]
             list_date = detail.get("OpenDate") or detail.get("list_date")
             delist_date = detail.get("ExpireDate") or detail.get("delist_date")
             is_st = 1 if _is_st(name, detail) else 0

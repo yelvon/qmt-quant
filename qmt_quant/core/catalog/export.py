@@ -33,7 +33,11 @@ def export_catalog(*, adjust_type: str = "front", fmt: str = "flat") -> Dict[str
             for code, group in df.groupby("code"):
                 frame = group.sort_values("date").copy()
                 path = catalog_dir / f"{code.replace('.', '_')}_{adjust_type}.parquet"
-                frame.to_parquet(path, index=False)
+                try:
+                    frame.to_parquet(path, index=False)
+                except ImportError:
+                    path = catalog_dir / f"{code.replace('.', '_')}_{adjust_type}.csv"
+                    frame.to_csv(path, index=False)
                 exported += 1
                 meta["instruments"].append({"code": code, "rows": len(frame), "file": path.name})
 

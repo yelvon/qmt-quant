@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from qmt_quant.adapters.qmt.runtime import XtDataBridgeClient, resolve_xtquant_port, should_use_x64_bridge
 from qmt_quant.core.doctor import ensure_xtquant_path
 
 
@@ -23,9 +24,14 @@ class DownloadStats:
 
 
 class XtDataClient:
-    """Thin wrapper around xtquant.xtdata with graceful import errors."""
+    """Thin wrapper around xtquant.xtdata; uses QMT x64 bridge on ARM64 hosts."""
 
     def __init__(self) -> None:
+        self._bridge: Optional[XtDataBridgeClient] = None
+        self._xt = None
+        if should_use_x64_bridge():
+            self._bridge = XtDataBridgeClient()
+            return
         ensure_xtquant_path()
         try:
             from xtquant import xtdata  # type: ignore
@@ -33,13 +39,22 @@ class XtDataClient:
             raise RuntimeError(
                 "xtquant not available. Start QMT and configure xtquant path in settings."
             ) from exc
+        if hasattr(xtdata, "connect"):
+            try:
+                xtdata.connect("", resolve_xtquant_port())
+            except Exception:
+                pass
         self._xt = xtdata
 
     def get_sector_stocks(self, sector: str) -> List[str]:
+        if self._bridge:
+            return [normalize_code(c) for c in self._bridge.get_sector_stocks(sector)]
         codes = self._xt.get_stock_list_in_sector(sector)
         return [normalize_code(c) for c in codes]
 
     def get_instrument_detail(self, code: str) -> Dict[str, Any]:
+        if self._bridge:
+            return self._bridge.get_instrument_detail(code)
         detail = self._xt.get_instrument_detail(code)
         return detail or {}
 
@@ -50,6 +65,13 @@ class XtDataClient:
         start_time: str = "",
         end_time: str = "",
     ) -> DownloadStats:
+        if self._bridge:
+            raw = self._bridge.download_history(list(codes), period, start_time, end_time)
+            return DownloadStats(
+                success=int(raw.get("success", 0)),
+                failed=int(raw.get("failed", 0)),
+                failed_codes=list(raw.get("failed_codes") or []),
+            )
         stats = DownloadStats()
         for code in codes:
             try:
@@ -79,6 +101,11 @@ class XtDataClient:
         end_time: str = "",
         dividend_type: str = "front",
     ) -> Dict[str, pd.DataFrame]:
+        if self._bridge:
+            raw = self._bridge.get_market_bars(
+                list(codes), period, start_time, end_time, dividend_type
+            )
+            return {normalize_code(k): v for k, v in raw.items()}
         fields = ["open", "high", "low", "close", "volume", "amount", "preClose"]
         if hasattr(self._xt, "get_market_data_ex"):
             raw = self._xt.get_market_data_ex(
@@ -102,6 +129,13 @@ class XtDataClient:
         return self._normalize_market_data(raw, codes)
 
     def download_financial(self, codes: Sequence[str], table_list: Sequence[str]) -> DownloadStats:
+        if self._bridge:
+            raw = self._bridge.download_financial(list(codes), list(table_list))
+            return DownloadStats(
+                success=int(raw.get("success", 0)),
+                failed=int(raw.get("failed", 0)),
+                failed_codes=list(raw.get("failed_codes") or []),
+            )
         stats = DownloadStats()
         try:
             if hasattr(self._xt, "download_financial_data2"):
@@ -124,6 +158,10 @@ class XtDataClient:
         end_time: str = "",
         report_type: str = "report_time",
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
+        if self._bridge:
+            return self._bridge.get_financial_data(
+                list(codes), list(table_list), start_time, end_time, report_type
+            )
         return self._xt.get_financial_data(
             stock_list=list(codes),
             table_list=list(table_list),

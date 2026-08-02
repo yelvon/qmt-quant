@@ -1,12 +1,13 @@
 qmt:
   install_dir: "C:\\qmt"
-  # xtquant is typically under QMT terminal bin.x64; doctor will try to locate it
+  # ARM64 主机：安装 Python 3.11 x64 + pip install xtquant，并启动 MiniQMT (XtMiniQmt)
   xtquant_site_packages: ""
+  xtquant_port: 58610
   userdata_path: ""
   account_id: ""
 
 python:
-  qmt_env: ""      # path to qmt-env python.exe
+  qmt_env: ""      # x64 Python 3.11+ (bridge)，或 QMT bin.x64/pythonw.exe
   quant_env: ""    # path to quant-env python.exe (3.12+)
 
 data:

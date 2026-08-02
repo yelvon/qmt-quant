@@ -80,14 +80,29 @@ def run_doctor() -> DoctorReport:
 
     xt_path = ensure_xtquant_path()
     xt_ok = False
-    xt_msg = xt_path or "xtquant not found on PYTHONPATH"
-    if xt_path:
-        try:
-            import xtquant  # noqa: F401
-            xt_ok = True
-            xt_msg = f"xtquant import ok ({xt_path})"
-        except Exception as exc:  # pragma: no cover
-            xt_msg = f"xtquant import failed: {exc}"
+    xt_msg = "xtquant not configured"
+    try:
+        from qmt_quant.adapters.qmt.runtime import ping_xtquant, should_use_x64_bridge
+
+        if should_use_x64_bridge():
+            info = ping_xtquant()
+            xt_ok = bool(info.get("ok"))
+            port = info.get("port", get_settings().xtquant_port)
+            xt_msg = (
+                f"xtquant bridge ok via x64 Python "
+                f"(port={port}, sector={info.get('sector_count', 0)})"
+            )
+        else:
+            if xt_path:
+                import xtquant  # noqa: F401
+                xt_ok = True
+                xt_msg = f"xtquant import ok ({xt_path})"
+            else:
+                import xtquant  # noqa: F401
+                xt_ok = True
+                xt_msg = "xtquant import ok (pip)"
+    except Exception as exc:
+        xt_msg = f"xtquant failed: {exc}"
     report.checks.append(CheckResult("xtquant", xt_ok, xt_msg))
 
     db_parent = settings.db_file.parent
