@@ -54,6 +54,124 @@ jobs:
   inline: false   # Web 在 quant-env 时，sync 任务自动 subprocess 到 qmt-env
 ```
 
+## 如何启动
+
+首次使用请先完成上方 **双环境安装**，并确保 `config/settings.yaml` 已配置 `python.qmt_env` / `python.quant_env`。数据同步与实盘需 **QMT 客户端已登录**。
+
+### 方式一：一键脚本（推荐）
+
+在项目根目录执行，自动启动 API + 前端并打开浏览器：
+
+```powershell
+.\start.bat
+# 或
+.\scripts\start.ps1
+```
+
+常用参数：
+
+| 参数 | 说明 |
+|------|------|
+| `-Install` | 强制重新执行 `npm install` |
+| `-NoBrowser` | 不自动打开浏览器 |
+| `-Stop` | 停止 8788 / 5173 端口上的服务 |
+
+访问地址：前端 http://localhost:5173 ，API http://127.0.0.1:8788
+
+### 方式二：Web 工作台（手动）
+
+需两个终端，均在 **quant-env** 下操作：
+
+```powershell
+# 终端 1 — 后端 API
+python -m qmt_quant.cli serve api
+
+# 终端 2 — 前端（首次需 npm install）
+cd web
+npm install
+npm run dev
+```
+
+浏览器打开 http://localhost:5173（Vite 将 `/api`、`/ws` 代理到 `127.0.0.1:8788`）。
+
+### 方式三：CLI 命令行
+
+不启动 Web 界面，直接在终端跑任务（`qmt-env` 或 `quant-env` 视命令而定，见 `doctor` 输出）：
+
+```powershell
+# 健康检查
+python -m qmt_quant.cli doctor
+
+# 一键流水线：数据检查 → 研究 → 验证
+python -m qmt_quant.cli pipeline
+
+# 仅启动 API（供前端或其他客户端调用）
+python -m qmt_quant.cli serve api
+```
+
+## 访问与使用
+
+启动成功后，**在浏览器访问前端**即可使用工作台（日常只需打开这一个地址）：
+
+| 入口 | 地址 | 说明 |
+|------|------|------|
+| **Web 工作台** | http://localhost:5173 | 主界面，左侧顶栏切换页面 |
+| 后端 API | http://127.0.0.1:8788/api/status | 健康检查（开发调试用，浏览器直接打开可查看 JSON） |
+
+> 请访问 **5173** 端口的前端页面，不要直接访问 8788。前端会自动把 `/api`、`/ws` 请求代理到后端。
+
+### 界面导航
+
+顶栏按量化流程排列，建议按编号顺序使用：
+
+| 页面 | 路径 | 做什么 |
+|------|------|--------|
+| ① 总览 | `/` | 环境/数据状态、今日建议、**一键跑通**（②→③→④） |
+| ② 准备数据 | `/data` | 从 QMT 同步股票池、日线、财报，导出 Parquet |
+| ③ 快速试策略 | `/research` | VectorBT 参数扫描（双均线 / 低PE动量等） |
+| ④ 仔细验策略 | `/validation` | A 股规则验证回测，与 ③ 结果对比 |
+| ⑤ 选股 | `/screening` | 模板选股、YAML 规则、选股结果回测 |
+| ⑥ 实盘 | `/live` | 连接 xttrader，默认 **模拟下单**（dry_run） |
+
+辅助页面：
+
+| 页面 | 路径 | 做什么 |
+|------|------|--------|
+| 数据浏览 | `/data/browse` | 查表、看日 K 线 |
+| 因子 IC | `/ic` | 因子与未来收益相关性 |
+| 任务记录 | `/jobs` | 查看历史任务、失败重试 |
+| 设置 | `/settings` | QMT 路径、Python 环境、回测参数 |
+| 帮助 | `/help` | VectorBT / 验证器 / 双环境说明 |
+
+### 推荐首次流程
+
+1. **设置**（`/settings`）— 填写 QMT 安装目录、`qmt_env` / `quant_env`，保存后状态应显示 doctor 通过。
+2. **准备数据**（`/data`）— 选择板块与范围（建议「全量 3 年」），点击同步；需 **QMT 已登录**。
+3. **快速试策略**（`/research`）— 选策略模板与时间范围，提交后等待任务完成，查看收益曲线与指标。
+4. **仔细验策略**（`/validation`）— 基于研究 run 做 A 股规则验证，对比 VectorBT 与验证器差异。
+5. **选股 / 实盘**（可选）— 在 ⑤ 跑选股模板；在 ⑥ 预览并提交订单（默认模拟，真仓需显式确认）。
+
+首页 **「一键跑通」** 会自动串联：数据检查 → 研究 → 验证，适合快速体验全流程。
+
+### 任务与进度
+
+- 各页面提交同步、回测、选股等操作后，会显示 **进度条**；完成后页面自动刷新结果。
+- 失败时查看进度条下方报错，或到 **任务记录**（`/jobs`）查看详情并重试。
+- 长时间任务（如同步全市场日线）请保持 API 窗口运行，不要关闭启动脚本弹出的终端。
+
+### 使用 CLI 时
+
+若用 **方式三** 启动，不打开浏览器，直接在终端执行命令；结果写入 `data/` 目录与 SQLite，也可随后启动 Web 查看历史 run 与图表。
+
+### 访问异常排查
+
+| 现象 | 处理 |
+|------|------|
+| 页面打不开 / 一直加载 | 确认两个终端（或启动脚本弹出的 API、前端窗口）都在运行；执行 `.\scripts\start.ps1 -Stop` 后重新启动 |
+| 接口报错 / 502 | 后端 API 未启动或 8788 被占用；检查 API 窗口日志 |
+| 数据同步失败 | QMT 客户端是否已登录；`设置` 页 doctor 是否全部通过 |
+| 只想本机访问 | 默认绑定 `127.0.0.1`，不对外网开放；无需改防火墙 |
+
 ## CLI 常用命令
 
 ```powershell
@@ -82,33 +200,16 @@ python -m qmt_quant.cli screen ic --template low_pe
 python -m qmt_quant.cli trade status
 python -m qmt_quant.cli trade submit --codes 600519.SH --live --confirm LIVE
 
-# 一键流水线 / Web API
+# 一键流水线
 python -m qmt_quant.cli pipeline
-python -m qmt_quant.cli serve api
 ```
-
-## Web 工作台
-
-终端 1（quant-env）：
-
-```powershell
-python -m qmt_quant.cli serve api
-```
-
-终端 2：
-
-```powershell
-cd web
-npm install
-npm run dev
-```
-
-浏览器打开 http://localhost:5173（Vite 代理 `/api` → `127.0.0.1:8788`）。
 
 ## 目录结构
 
 ```
 qmt-quant/
+├── start.bat                  # 一键启动 Web 工作台
+├── scripts/start.ps1          # 启动脚本（含 -Stop / -Install）
 ├── config/settings.yaml.example
 ├── docs/CHANGELOG.md          # 变更记录
 ├── docs/progress.md           # PRD 进度对照
