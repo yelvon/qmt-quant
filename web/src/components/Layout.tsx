@@ -10,6 +10,7 @@ const mainLinks = [
 ];
 
 const secondaryLinks = [
+  { to: "/data/browse", label: "数据浏览" },
   { to: "/jobs", label: "任务记录" },
   { to: "/ic", label: "因子 IC" },
   { to: "/help", label: "帮助" },

@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from qmt_quant.config import get_settings
+from qmt_quant.core.data.kline import build_kline_payload
+from qmt_quant.core.data.query import get_date_range, list_available_adjust_types, query_table
+from qmt_quant.core.data.table_meta import get_table_meta, list_tables
 from qmt_quant.core.doctor import run_doctor
 from qmt_quant.core.jobs.runner import fetch_job, list_recent_jobs, submit_job, subscribe
 from qmt_quant.core.presets import resolve_range_preset
@@ -190,6 +193,79 @@ def create_app() -> FastAPI:
     @app.get("/api/data/check")
     def api_data_check() -> Dict[str, Any]:
         return run_data_check()
+
+    @app.get("/api/data/meta")
+    def api_data_meta(table: str) -> Dict[str, Any]:
+        try:
+            meta = get_table_meta(table)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with db_session() as conn:
+            meta["available_adjust_types"] = list_available_adjust_types(conn)
+        return {"ok": True, **meta}
+
+    @app.get("/api/data/tables")
+    def api_data_tables() -> Dict[str, Any]:
+        return {"tables": list_tables()}
+
+    @app.get("/api/data/query")
+    def api_data_query(
+        table: str,
+        view_mode: str,
+        date: Optional[str] = None,
+        code: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        adjust: str = "front",
+        q: Optional[str] = None,
+        exclude_st: bool = False,
+        page: int = 1,
+        page_size: int = 100,
+        sort_col: Optional[str] = None,
+        sort_dir: str = "asc",
+    ) -> Dict[str, Any]:
+        try:
+            with db_session() as conn:
+                result = query_table(
+                    conn,
+                    table,
+                    view_mode,
+                    date=date,
+                    code=code,
+                    date_from=date_from,
+                    date_to=date_to,
+                    adjust_type=adjust,
+                    q=q,
+                    exclude_st=exclude_st,
+                    page=page,
+                    page_size=page_size,
+                    sort_col=sort_col,
+                    sort_dir=sort_dir,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, **result}
+
+    @app.get("/api/data/kline")
+    def api_data_kline(
+        code: str,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        adjust: str = "front",
+    ) -> Dict[str, Any]:
+        try:
+            with db_session() as conn:
+                return build_kline_payload(conn, code, date_from, date_to, adjust)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/data/dates")
+    def api_data_dates(adjust: str = "front") -> Dict[str, Any]:
+        try:
+            with db_session() as conn:
+                return {"ok": True, **get_date_range(conn, adjust)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/jobs/sync/bars")
     def job_sync_bars(body: SyncBarsBody) -> Dict[str, str]:

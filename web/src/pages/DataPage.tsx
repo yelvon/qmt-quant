@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiGet, apiPost, useJobProgress } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
@@ -75,6 +76,11 @@ export default function DataPage() {
   return (
     <div>
       <PageCallout>仅下拉/勾选，Primary =「更新今日数据」。同步完成后可导出 Parquet 供验策略使用。</PageCallout>
+      <p className="mb-4 text-sm text-slate-400">
+        <Link to="/data/browse" className="text-emerald-400 hover:underline">
+          查看已同步数据 →
+        </Link>
+      </p>
       <div className="card grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <PresetSelect label="股票池" value={sector} options={sectors} onChange={setSector} />
         <PresetSelect label="复权" value={adjust} options={ADJUST_OPTIONS} onChange={setAdjust} />

@@ -20,6 +20,7 @@ validate_app = typer.Typer(help="Nautilus validation")
 screen_app = typer.Typer(help="Stock screening")
 trade_app = typer.Typer(help="Live trading")
 serve_app = typer.Typer(help="Web server")
+data_app = typer.Typer(help="Data browse commands")
 
 app.add_typer(sync_app, name="sync")
 app.add_typer(catalog_app, name="catalog")
@@ -28,6 +29,7 @@ app.add_typer(validate_app, name="validate")
 app.add_typer(screen_app, name="screen")
 app.add_typer(trade_app, name="trade")
 app.add_typer(serve_app, name="serve")
+app.add_typer(data_app, name="data")
 
 
 @app.command("doctor")
@@ -290,6 +292,54 @@ def serve_api(
         port=port or settings.web_port,
         reload=reload,
     )
+
+
+@data_app.command("query")
+def data_query_cmd(
+    table: str = typer.Option("daily_bar"),
+    view_mode: str = typer.Option("series"),
+    code: Optional[str] = typer.Option(None),
+    date: Optional[str] = typer.Option(None),
+    date_from: Optional[str] = typer.Option(None, "--from"),
+    date_to: Optional[str] = typer.Option(None, "--to"),
+    adjust: str = typer.Option("front"),
+    page: int = typer.Option(1),
+    page_size: int = typer.Option(100),
+) -> None:
+    """Query browsable tables (daily_bar / instrument)."""
+    from qmt_quant.core.data.query import query_table
+    from qmt_quant.storage.database import db_session
+
+    with db_session() as conn:
+        result = query_table(
+            conn,
+            table,
+            view_mode,
+            code=code,
+            date=date,
+            date_from=date_from,
+            date_to=date_to,
+            adjust_type=adjust,
+            page=page,
+            page_size=page_size,
+        )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@data_app.command("kline")
+def data_kline_cmd(
+    code: str = typer.Option(...),
+    date_from: Optional[str] = typer.Option(None, "--from"),
+    date_to: Optional[str] = typer.Option(None, "--to"),
+    adjust: str = typer.Option("front"),
+) -> None:
+    """Export kline JSON for a symbol."""
+    from qmt_quant.core.data.kline import build_kline_payload
+    from qmt_quant.storage.database import db_session
+
+    with db_session() as conn:
+        payload = build_kline_payload(conn, code, date_from, date_to, adjust)
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 @app.command("pipeline")

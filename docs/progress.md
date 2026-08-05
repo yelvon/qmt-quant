@@ -31,6 +31,7 @@
 | DS-014 | Idempotent upsert | Done |
 | DS-015 | Parquet catalog export | Done (flat + NT MVP) |
 | DS-016 | Data quality checks | Done |
+| DS-浏览 | Daily bar / instrument browse + kline (Web + API) | Done |
 | DS-020 | Financial batch download | Done |
 | DS-021 | Core financial tables | Done |
 | DS-022 | report_date + announce_date | Done |

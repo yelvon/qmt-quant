@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- 数据浏览 MVP：`daily_bar` / `instrument` 分页查询、日 K 线 API 与 Web 页 `/data/browse`
+- `qmt_quant/core/data/`：`table_meta`、`query`、`kline`；CLI `data query` / `data kline`
+- Web 组件：CandlestickChart、DataTable、`dataApi.ts`；导航「数据浏览」入口
 - Web UX 优化：导航重组（①–⑥ 主流程 + 次要入口）、总览行动卡片、首次引导 checklist
 - 共享组件：DataHealthPanel、ComparisonCard、StepProgress、ActionCard、EmptyState、TechnicalDetails
 - `/api/status` 扩展 `actions` / `onboarding_complete`；`GET /api/doctor`；`POST /api/jobs/{id}/retry`

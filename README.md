@@ -8,6 +8,7 @@
 |------|------|
 | ① 总览 | 环境/数据状态、一键跑通 ②→③→④ |
 | ② 准备数据 | QMT 同步日线/财报、导出 Parquet |
+| 数据浏览 | 横截面/时间序列表格、日 K 线（`/data/browse`） |
 | ③ 快速试策略 | VectorBT 参数扫描（双均线 / 低PE动量 / 选股调仓） |
 | ④ 仔细验策略 | 自研 A 股验证器（T+1/滑点/涨跌停）+ 与 ③ 对比 |
 | ⑤ 选股 | 模板 + 可视化条件 + YAML 规则 |
@@ -62,6 +63,8 @@ python -m qmt_quant.cli sync financial
 python -m qmt_quant.cli sync universe
 python -m qmt_quant.cli catalog export --fmt both
 python -m qmt_quant.cli sync check
+python -m qmt_quant.cli data query --table daily_bar --view-mode series --code 600519.SH --from 2024-01-01 --to 2024-06-30 --adjust front
+python -m qmt_quant.cli data kline --code 600519.SH --from 2024-01-01 --to 2024-06-30
 
 # 研究 / 验证
 python -m qmt_quant.cli research run --strategy ma_cross --range-preset 3y

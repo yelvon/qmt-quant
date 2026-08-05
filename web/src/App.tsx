@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import DashboardPage from "./pages/DashboardPage";
 import DataPage from "./pages/DataPage";
+import DataBrowsePage from "./pages/DataBrowsePage";
 import ResearchPage from "./pages/ResearchPage";
 import ValidationPage from "./pages/ValidationPage";
 import ScreeningPage from "./pages/ScreeningPage";
@@ -17,6 +18,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/data" element={<DataPage />} />
+        <Route path="/data/browse" element={<DataBrowsePage />} />
         <Route path="/research" element={<ResearchPage />} />
         <Route path="/validation" element={<ValidationPage />} />
         <Route path="/screening" element={<ScreeningPage />} />

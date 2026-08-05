@@ -3,6 +3,10 @@ import PageCallout from "../components/PageCallout";
 
 const sections = [
   {
+    title: "数据浏览（② 同步后）",
+    body: "在「数据浏览」页可按交易日查看横截面、按代码查看时间序列，并绘制日 K 线。若无数据请先在 ② 准备数据 同步日线。",
+  },
+  {
     title: "VectorBT 快速试策略（③）",
     body: "用 VectorBT 在日线数据上做参数扫描和热力图，快速找到较优的均线组合。结果仅供参考，不能代替真实成交规则验证。",
   },
