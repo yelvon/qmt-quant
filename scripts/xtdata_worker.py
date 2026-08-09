@@ -223,6 +223,41 @@ def _cmd_probe_port(xtdata, params):
     return {"port": port, "data_ok": True}
 
 
+def _cmd_get_trading_dates(xtdata, params):
+    _ensure_connect(xtdata)
+    market = params.get("market", "SH")
+    start_time = params.get("start_time", "")
+    end_time = params.get("end_time", "")
+    dates = []
+    if hasattr(xtdata, "get_trading_dates"):
+        try:
+            raw = xtdata.get_trading_dates(market, start_time, end_time)
+            for d in raw or []:
+                s = str(d).replace("-", "")[:8]
+                if len(s) == 8:
+                    dates.append("%s-%s-%s" % (s[:4], s[4:6], s[6:8]))
+        except Exception:
+            dates = []
+    if not dates:
+        ref = "000001.SH" if market.upper() in ("SH", "SSE", "") else "399001.SZ"
+        bars = _cmd_get_market_bars(
+            xtdata,
+            {
+                "codes": [ref],
+                "period": "1d",
+                "start_time": start_time,
+                "end_time": end_time,
+                "dividend_type": "none",
+            },
+        )
+        payload = (bars.get("bars") or {}).get(ref)
+        if payload:
+            obj = json.loads(payload) if isinstance(payload, str) else payload
+            for idx in obj.get("index") or []:
+                dates.append(str(idx)[:10])
+    return {"dates": sorted(set(dates))}
+
+
 HANDLERS = {
     "ping": _cmd_ping,
     "probe_port": _cmd_probe_port,
@@ -232,6 +267,7 @@ HANDLERS = {
     "get_market_bars": _cmd_get_market_bars,
     "download_financial": _cmd_download_financial,
     "get_financial": _cmd_get_financial,
+    "get_trading_dates": _cmd_get_trading_dates,
 }
 
 

@@ -20,6 +20,13 @@ data:
   bar_adjust_type: "front"
   sync_batch_size: 50
   auto_export_catalog: true
+  sync:
+    incremental_days: 5
+    stale_trading_days: 3
+    gap_scan_lookback: "3y"
+    completeness_threshold: 0.85
+    auto_repair: false
+    auto_repair_max_codes: 200
 
 backtest:
   initial_cash: 1000000

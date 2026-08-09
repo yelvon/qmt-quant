@@ -56,6 +56,19 @@ class ScreenIcBody(BaseModel):
 class SyncFinancialBody(BaseModel):
     sector: str = "沪深A股"
     tables: List[str] = Field(default_factory=lambda: ["Balance", "Income", "CashFlow", "Pershareindex"])
+    incremental: bool = True
+
+
+class SyncRepairBody(BaseModel):
+    sector: str = "沪深A股"
+    adjust: str = "front"
+    codes: Optional[List[str]] = None
+
+
+class SyncCheckRepairBody(BaseModel):
+    sector: str = "沪深A股"
+    adjust: str = "front"
+    detailed: bool = True
 
 
 class ResearchBody(BaseModel):
@@ -103,6 +116,7 @@ class SettingsBody(BaseModel):
     dry_run: Optional[bool] = None
     commission_rate: Optional[float] = None
     stamp_tax_rate: Optional[float] = None
+    sync_auto_repair: Optional[bool] = None
 
 
 class TradeBody(BaseModel):
@@ -171,6 +185,7 @@ def create_app() -> FastAPI:
             doctor_ok=doctor.ok,
             checks=checks,
             bar_coverage_pct=coverage,
+            needs_repair=bool(check.get("needs_repair")),
         )
         return {
             "doctor_ok": doctor.ok,
@@ -191,8 +206,12 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/data/check")
-    def api_data_check() -> Dict[str, Any]:
-        return run_data_check()
+    def api_data_check(
+        detailed: bool = False,
+        sector: str = "沪深A股",
+        adjust: str = "front",
+    ) -> Dict[str, Any]:
+        return run_data_check(sector=sector, adjust_type=adjust, detailed=detailed)
 
     @app.get("/api/data/meta")
     def api_data_meta(table: str) -> Dict[str, Any]:
@@ -293,7 +312,39 @@ def create_app() -> FastAPI:
             display_name="同步财报",
             job_type="sync_financial",
             env="qmt",
-            params={"sector": body.sector, "tables": body.tables},
+            params={
+                "sector": body.sector,
+                "tables": body.tables,
+                "incremental": body.incremental,
+            },
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/sync/repair")
+    def job_sync_repair(body: SyncRepairBody) -> Dict[str, str]:
+        job_id = submit_job(
+            display_name="修复数据缺口",
+            job_type="sync_repair",
+            env="qmt",
+            params={
+                "sector": body.sector,
+                "adjust_type": body.adjust,
+                "codes": body.codes,
+            },
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/sync/check-repair")
+    def job_sync_check_repair(body: SyncCheckRepairBody) -> Dict[str, str]:
+        job_id = submit_job(
+            display_name="检查并修复数据",
+            job_type="sync_check_repair",
+            env="qmt",
+            params={
+                "sector": body.sector,
+                "adjust_type": body.adjust,
+                "detailed": body.detailed,
+            },
         )
         return {"job_id": job_id}
 
@@ -595,6 +646,8 @@ def create_app() -> FastAPI:
             s.commission_rate = body.commission_rate
         if body.stamp_tax_rate is not None:
             s.stamp_tax_rate = body.stamp_tax_rate
+        if body.sync_auto_repair is not None:
+            s.sync_auto_repair = body.sync_auto_repair
         s.save()
         from qmt_quant import config
 

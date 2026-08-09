@@ -22,6 +22,16 @@ def test_actions_sync_when_low_coverage():
     assert any(a["id"] == "sync_data" for a in actions)
 
 
+def test_actions_repair_when_needs_repair():
+    actions = build_status_actions(
+        doctor_ok=True,
+        checks=[],
+        bar_coverage_pct=90,
+        needs_repair=True,
+    )
+    assert any(a["id"] == "repair_data" for a in actions)
+
+
 def test_actions_try_strategy_when_ready():
     actions = build_status_actions(
         doctor_ok=True,

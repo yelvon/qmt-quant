@@ -25,6 +25,24 @@ def _dispatch(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.sync.financial import sync_financial
 
         return sync_financial(**params)
+    if job_type == "sync_repair":
+        from qmt_quant.core.sync.gaps import RepairPlan, build_repair_plan
+        from qmt_quant.core.sync.repair import sync_bars_repair
+
+        plan_data = params.pop("repair_plan", None)
+        if plan_data:
+            plan = RepairPlan.from_dict(plan_data)
+        else:
+            plan = build_repair_plan(
+                sector=params.get("sector", "沪深A股"),
+                adjust_type=params.get("adjust_type", "front"),
+                codes=params.pop("codes", None),
+            )
+        return sync_bars_repair(plan, sector=params.get("sector"))
+    if job_type == "sync_check_repair":
+        from qmt_quant.core.sync.repair import run_check_and_repair
+
+        return run_check_and_repair(**params)
     if job_type == "catalog_export":
         from qmt_quant.core.catalog.export import export_catalog
 

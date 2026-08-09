@@ -1,6 +1,6 @@
 # qmt-quant Implementation Progress
 
-> Last updated: 2026-07-31  
+> Last updated: 2026-08-09  
 > PRD version: v0.3
 
 ## Phase Milestones
@@ -36,8 +36,10 @@
 | DS-021 | Core financial tables | Done |
 | DS-022 | report_date + announce_date | Done |
 | DS-023 | Structured SQLite storage | Done |
-| DS-024 | Financial incremental update | Partial |
+| DS-024 | Financial incremental update | Done |
 | DS-025 | announce_date anti-lookahead | Done |
+| DS-026 | Bar gap detection + stale scan | Done |
+| DS-027 | Targeted bar repair + check-repair | Done |
 
 ## P0 Backtest (§6.2)
 

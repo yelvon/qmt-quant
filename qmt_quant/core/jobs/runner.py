@@ -127,6 +127,26 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.sync.financial import sync_financial
 
         return sync_financial(**params)
+    if job_type == "sync_repair":
+        from qmt_quant.core.sync.gaps import RepairPlan
+        from qmt_quant.core.sync.repair import sync_bars_repair
+
+        plan_data = params.pop("repair_plan", None)
+        plan = RepairPlan.from_dict(plan_data) if plan_data else None
+        if plan is None:
+            from qmt_quant.core.sync.gaps import build_repair_plan
+
+            codes = params.pop("codes", None)
+            plan = build_repair_plan(
+                sector=params.get("sector", "沪深A股"),
+                adjust_type=params.get("adjust_type", "front"),
+                codes=codes,
+            )
+        return sync_bars_repair(plan, sector=params.get("sector"))
+    if job_type == "sync_check_repair":
+        from qmt_quant.core.sync.repair import run_check_and_repair
+
+        return run_check_and_repair(**params)
     if job_type == "catalog_export":
         from qmt_quant.core.catalog.export import export_catalog
 
@@ -180,7 +200,10 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
     out: Dict[str, Any] = {}
     try:
         _step(0.1, "sync", "更新数据")
-        out["sync"] = sync_bars(incremental=True, incremental_days=params.get("days", 5))
+        out["sync"] = sync_bars(
+            incremental=True,
+            incremental_days=params.get("days", get_settings().sync_incremental_days),
+        )
     except Exception as exc:
         raise RuntimeError(f"[sync] {exc}") from exc
     try:

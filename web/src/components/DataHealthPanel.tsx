@@ -14,24 +14,42 @@ type Props = {
     checks?: Check[];
     bar_coverage_pct?: number;
     as_of?: string;
+    needs_repair?: boolean;
+    gap_summary?: { stale_count?: number };
+    stale_codes?: string[];
   } | null;
+  onRepair?: () => void;
+  repairing?: boolean;
 };
 
-export default function DataHealthPanel({ check }: Props) {
+export default function DataHealthPanel({ check, onRepair, repairing }: Props) {
   if (!check) {
     return <p className="text-sm text-slate-500">加载中…</p>;
   }
 
   const items = check.checks || [];
+  const coreOk = items.slice(0, 4).every((c) => c.ok);
+  const staleCount = check.gap_summary?.stale_count ?? 0;
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-400">
           行情覆盖 {check.bar_coverage_pct ?? "—"}%
+          {staleCount > 0 ? ` · 滞后 ${staleCount} 只` : ""}
           {check.as_of ? ` · 截至 ${check.as_of}` : ""}
         </p>
-        <StatusBadge ok={items.every((c) => c.ok)} label={items.every((c) => c.ok) ? "数据就绪" : "需关注"} />
+        <div className="flex items-center gap-2">
+          {check.needs_repair && onRepair && (
+            <button type="button" className="btn-primary text-xs" disabled={repairing} onClick={onRepair}>
+              {repairing ? "修复中…" : "一键修复"}
+            </button>
+          )}
+          <StatusBadge
+            ok={coreOk && !check.needs_repair}
+            label={coreOk && !check.needs_repair ? "数据就绪" : "需关注"}
+          />
+        </div>
       </div>
       <ul className="space-y-2">
         {items.map((c) => (

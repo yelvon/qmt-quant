@@ -170,6 +170,40 @@ class XtDataClient:
             report_type=report_type,
         )
 
+    def get_trading_dates(
+        self,
+        *,
+        market: str = "SH",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> List[str]:
+        """Return ISO trading dates; fallback to index 000001.SH bars."""
+        start_qmt = to_qmt_date(start_date) if start_date else ""
+        end_qmt = to_qmt_date(end_date) if end_date else ""
+        if self._bridge:
+            raw = self._bridge.get_trading_dates(market, start_qmt, end_qmt)
+            return list(raw)
+        if self._xt is not None and hasattr(self._xt, "get_trading_dates"):
+            try:
+                raw = self._xt.get_trading_dates(market, start_qmt, end_qmt)
+                return [_from_qmt_date(str(d)) for d in (raw or [])]
+            except Exception:
+                pass
+        ref_code = "000001.SH" if market.upper() in ("SH", "SSE", "") else "399001.SZ"
+        bars = self.get_market_bars(
+            [ref_code],
+            period="1d",
+            start_time=start_qmt,
+            end_time=end_qmt,
+            dividend_type="none",
+        )
+        frame = bars.get(ref_code)
+        if frame is None or frame.empty:
+            return []
+        if not isinstance(frame.index, pd.DatetimeIndex):
+            frame.index = pd.to_datetime(frame.index)
+        return sorted(pd.Timestamp(ts).strftime("%Y-%m-%d") for ts in frame.index)
+
     @staticmethod
     def _normalize_market_data(raw: Any, codes: Sequence[str]) -> Dict[str, pd.DataFrame]:
         out: Dict[str, pd.DataFrame] = {}
@@ -200,3 +234,10 @@ def normalize_code(code: str) -> str:
 
 def to_qmt_date(date_str: str) -> str:
     return date_str.replace("-", "")
+
+
+def _from_qmt_date(raw: str) -> str:
+    s = raw.replace("-", "")[:8]
+    if len(s) == 8:
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return raw

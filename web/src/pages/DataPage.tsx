@@ -19,10 +19,15 @@ const RANGE_OPTIONS = [
   { id: "5y", label: "全量 5 年" },
 ];
 
+function checkUrl(sector: string, adjust: string) {
+  return `/api/data/check?detailed=true&sector=${encodeURIComponent(sector)}&adjust=${encodeURIComponent(adjust)}`;
+}
+
 export default function DataPage() {
   const [sector, setSector] = useState("沪深A股");
   const [adjust, setAdjust] = useState("front");
   const [rangePreset, setRangePreset] = useState("");
+  const [financialFull, setFinancialFull] = useState(false);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [check, setCheck] = useState<any>(null);
   const [jobId, setJobId] = useState("");
@@ -30,10 +35,14 @@ export default function DataPage() {
   const [status, setStatus] = useState("");
   const [jobError, setJobError] = useState<string | null>(null);
 
+  const refreshCheck = useCallback(() => {
+    return apiGet(checkUrl(sector, adjust)).then(setCheck);
+  }, [sector, adjust]);
+
   useEffect(() => {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
-    apiGet("/api/data/check").then(setCheck);
-  }, []);
+    refreshCheck();
+  }, [refreshCheck]);
 
   const onJob = useCallback(
     (data: Record<string, unknown>) => {
@@ -42,12 +51,12 @@ export default function DataPage() {
         setStatus(String(data.status || ""));
         if (data.error) setJobError(String(data.error));
         if (data.status === "completed") {
-          apiGet("/api/data/check").then(setCheck);
+          refreshCheck();
           setJobError(null);
         }
       }
     },
-    [jobId]
+    [jobId, refreshCheck]
   );
   useJobProgress(onJob);
 
@@ -64,7 +73,10 @@ export default function DataPage() {
   }
 
   async function syncFinancial() {
-    const res = await apiPost<{ job_id: string }>("/api/jobs/sync/financial", { sector });
+    const res = await apiPost<{ job_id: string }>("/api/jobs/sync/financial", {
+      sector,
+      incremental: !financialFull,
+    });
     setJobId(res.job_id);
   }
 
@@ -73,9 +85,21 @@ export default function DataPage() {
     setJobId(res.job_id);
   }
 
+  async function checkRepair() {
+    const res = await apiPost<{ job_id: string }>("/api/jobs/sync/check-repair", {
+      sector,
+      adjust,
+      detailed: true,
+    });
+    setJobId(res.job_id);
+    setJobError(null);
+  }
+
   return (
     <div>
-      <PageCallout>仅下拉/勾选，Primary =「更新今日数据」。同步完成后可导出 Parquet 供验策略使用。</PageCallout>
+      <PageCallout>
+        Primary =「更新今日数据」（近 5 日增量）。若健康检查提示缺口，使用「一键修复」定向补洞。
+      </PageCallout>
       <p className="mb-4 text-sm text-slate-400">
         <Link to="/data/browse" className="text-emerald-400 hover:underline">
           查看已同步数据 →
@@ -93,12 +117,20 @@ export default function DataPage() {
             全量同步
           </button>
           <button className="btn-secondary" onClick={syncFinancial}>
-            同步财报
+            同步财报{financialFull ? "（全量）" : "（增量）"}
           </button>
           <button className="btn-secondary" onClick={exportCatalog}>
             导出验策略文件
           </button>
         </div>
+        <label className="flex items-center gap-2 text-sm text-slate-400 lg:col-span-3">
+          <input
+            type="checkbox"
+            checked={financialFull}
+            onChange={(e) => setFinancialFull(e.target.checked)}
+          />
+          财报全量重拉（默认增量，仅拉新披露）
+        </label>
         {jobId && (
           <JobProgressBar
             progress={progress}
@@ -110,7 +142,11 @@ export default function DataPage() {
       </div>
       <div className="card mt-4">
         <h2 className="mb-3 font-medium">数据健康</h2>
-        <DataHealthPanel check={check} />
+        <DataHealthPanel
+          check={check}
+          onRepair={checkRepair}
+          repairing={status === "running" && !!jobId}
+        />
       </div>
     </div>
   );

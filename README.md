@@ -163,6 +163,41 @@ python -m qmt_quant.cli serve api
 
 若用 **方式三** 启动，不打开浏览器，直接在终端执行命令；结果写入 `data/` 目录与 SQLite，也可随后启动 Web 查看历史 run 与图表。
 
+### 数据同步与完整性
+
+| 方式 | 说明 |
+|------|------|
+| **更新今日数据** | 近 5 日增量（`data.sync.incremental_days` 可配） |
+| **全量同步** | 按 1y / 3y / 5y 拉历史 |
+| **一键修复** | 数据健康面板检测缺口后定向补洞 |
+| **自动修复** | 设置页开启 `auto_repair`，增量同步后自动修复（默认关） |
+
+CLI：
+
+```powershell
+python -m qmt_quant.cli sync check --detailed
+python -m qmt_quant.cli sync check --repair      # 检查并修复
+python -m qmt_quant.cli sync repair              # 仅修复
+python -m qmt_quant.cli sync financial           # 财报增量（默认）
+python -m qmt_quant.cli sync financial --full    # 财报全量
+python -m qmt_quant.cli sync calendar            # 从 QMT 同步交易日历
+```
+
+健康检查项：日线覆盖率、市场新鲜度、个股滞后、市场缺日、交易日历、财报、K 线质量。
+
+配置示例（`config/settings.yaml`）：
+
+```yaml
+data:
+  sync:
+    incremental_days: 5
+    stale_trading_days: 3
+    gap_scan_lookback: "3y"
+    completeness_threshold: 0.85
+    auto_repair: false
+    auto_repair_max_codes: 200
+```
+
 ### 访问异常排查
 
 | 现象 | 处理 |
@@ -177,6 +212,11 @@ python -m qmt_quant.cli serve api
 ```powershell
 # 数据
 python -m qmt_quant.cli sync bars --incremental
+python -m qmt_quant.cli sync check --detailed
+python -m qmt_quant.cli sync check --repair
+python -m qmt_quant.cli sync repair
+python -m qmt_quant.cli sync financial
+python -m qmt_quant.cli sync financial --full
 python -m qmt_quant.cli sync financial
 python -m qmt_quant.cli sync universe
 python -m qmt_quant.cli catalog export --fmt both

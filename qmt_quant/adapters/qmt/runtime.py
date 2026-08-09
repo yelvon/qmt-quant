@@ -363,3 +363,15 @@ class XtDataBridgeClient:
                 if payload:
                     out[code][tname] = _json_to_df(payload)
         return out
+
+    def get_trading_dates(
+        self,
+        market: str = "SH",
+        start_time: str = "",
+        end_time: str = "",
+    ) -> List[str]:
+        result = _run_xt_worker(
+            "get_trading_dates",
+            {"market": market, "start_time": start_time, "end_time": end_time},
+        )
+        return [str(d) for d in (result.get("dates") or [])]

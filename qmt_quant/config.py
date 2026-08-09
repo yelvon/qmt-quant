@@ -35,6 +35,12 @@ class Settings:
     default_sector: str = "沪深A股"
     bar_adjust_type: str = "front"
     sync_batch_size: int = 50
+    sync_incremental_days: int = 5
+    sync_stale_trading_days: int = 3
+    sync_gap_scan_lookback: str = "3y"
+    sync_completeness_threshold: float = 0.85
+    sync_auto_repair: bool = False
+    sync_auto_repair_max_codes: int = 200
     auto_export_catalog: bool = True
     initial_cash: float = 1_000_000.0
     commission_rate: float = 0.0003
@@ -64,6 +70,7 @@ class Settings:
         qmt = raw.get("qmt", {})
         py = raw.get("python", {})
         data = raw.get("data", {})
+        sync = data.get("sync", {})
         bt = raw.get("backtest", {})
         trade = raw.get("trade", {})
         web = raw.get("web", {})
@@ -82,6 +89,16 @@ class Settings:
             default_sector=data.get("default_sector", cls.default_sector),
             bar_adjust_type=data.get("bar_adjust_type", cls.bar_adjust_type),
             sync_batch_size=int(data.get("sync_batch_size", cls.sync_batch_size)),
+            sync_incremental_days=int(sync.get("incremental_days", cls.sync_incremental_days)),
+            sync_stale_trading_days=int(sync.get("stale_trading_days", cls.sync_stale_trading_days)),
+            sync_gap_scan_lookback=str(sync.get("gap_scan_lookback", cls.sync_gap_scan_lookback)),
+            sync_completeness_threshold=float(
+                sync.get("completeness_threshold", cls.sync_completeness_threshold)
+            ),
+            sync_auto_repair=bool(sync.get("auto_repair", cls.sync_auto_repair)),
+            sync_auto_repair_max_codes=int(
+                sync.get("auto_repair_max_codes", cls.sync_auto_repair_max_codes)
+            ),
             auto_export_catalog=bool(data.get("auto_export_catalog", cls.auto_export_catalog)),
             initial_cash=float(bt.get("initial_cash", cls.initial_cash)),
             commission_rate=float(bt.get("commission_rate", cls.commission_rate)),
@@ -141,6 +158,14 @@ class Settings:
                 "bar_adjust_type": self.bar_adjust_type,
                 "sync_batch_size": self.sync_batch_size,
                 "auto_export_catalog": self.auto_export_catalog,
+                "sync": {
+                    "incremental_days": self.sync_incremental_days,
+                    "stale_trading_days": self.sync_stale_trading_days,
+                    "gap_scan_lookback": self.sync_gap_scan_lookback,
+                    "completeness_threshold": self.sync_completeness_threshold,
+                    "auto_repair": self.sync_auto_repair,
+                    "auto_repair_max_codes": self.sync_auto_repair_max_codes,
+                },
             },
             "backtest": {
                 "initial_cash": self.initial_cash,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def build_status_actions(
@@ -10,6 +10,7 @@ def build_status_actions(
     doctor_ok: bool,
     checks: List[Dict[str, Any]],
     bar_coverage_pct: float,
+    needs_repair: bool = False,
 ) -> List[Dict[str, str]]:
     actions: List[Dict[str, str]] = []
 
@@ -29,7 +30,16 @@ def build_status_actions(
             }
         )
 
-    if bar_coverage_pct < 80:
+    if needs_repair:
+        actions.append(
+            {
+                "id": "repair_data",
+                "label": "修复数据缺口",
+                "route": "/data",
+                "reason": "检测到行情滞后或缺日，建议一键修复",
+            }
+        )
+    elif bar_coverage_pct < 80:
         actions.append(
             {
                 "id": "sync_data",

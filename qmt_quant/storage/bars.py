@@ -111,3 +111,71 @@ def coverage_stats(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict
         (adjust_type,),
     ).fetchone()
     return dict(row) if row else {}
+
+
+def market_latest_date(conn: sqlite3.Connection, adjust_type: str = "front") -> Optional[str]:
+    row = conn.execute(
+        "SELECT MAX(date) FROM daily_bar WHERE adjust_type = ?",
+        (adjust_type,),
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def latest_bar_dates(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[str, str]:
+    rows = conn.execute(
+        """
+        SELECT code, MAX(date) AS latest
+        FROM daily_bar WHERE adjust_type = ?
+        GROUP BY code
+        """,
+        (adjust_type,),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def bar_counts_by_code(
+    conn: sqlite3.Connection,
+    start: str,
+    end: str,
+    adjust_type: str = "front",
+    codes: Optional[Sequence[str]] = None,
+) -> Dict[str, int]:
+    clauses = ["adjust_type = ?", "date >= ?", "date <= ?"]
+    params: List = [adjust_type, start, end]
+    if codes:
+        placeholders = ",".join("?" * len(codes))
+        clauses.append(f"code IN ({placeholders})")
+        params.extend(codes)
+    where = " AND ".join(clauses)
+    rows = conn.execute(
+        f"""
+        SELECT code, COUNT(*) AS cnt
+        FROM daily_bar WHERE {where}
+        GROUP BY code
+        """,
+        params,
+    ).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+def index_bar_dates(
+    conn: sqlite3.Connection,
+    code: str = "000001.SH",
+    adjust_type: str = "front",
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> List[str]:
+    clauses = ["code = ?", "adjust_type = ?"]
+    params: List = [code, adjust_type]
+    if start:
+        clauses.append("date >= ?")
+        params.append(start)
+    if end:
+        clauses.append("date <= ?")
+        params.append(end)
+    where = " AND ".join(clauses)
+    rows = conn.execute(
+        f"SELECT date FROM daily_bar WHERE {where} ORDER BY date",
+        params,
+    ).fetchall()
+    return [r[0] for r in rows]

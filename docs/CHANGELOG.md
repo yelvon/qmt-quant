@@ -8,6 +8,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- 数据同步补强：缺口检测（`gaps.py`）、定向修复（`repair.py`）、`sync_meta` 水位表
+- 深度健康检查：市场新鲜度、个股滞后、市场缺日、区间完整度（`--detailed`）
+- CLI / Web：`sync repair`、`sync check --repair`；数据页「一键修复」；设置页 `auto_repair`
+- 财报增量同步（DS-024）：`announce_date` 水位 + `sync financial --full` 全量选项
+- QMT 交易日历真源：`get_trading_dates` + `sync calendar`（fallback 指数 K 线）
+- `migrations/002_sync_meta.sql`；`data.sync.*` 配置项
 - 数据浏览 MVP：`daily_bar` / `instrument` 分页查询、日 K 线 API 与 Web 页 `/data/browse`
 - `qmt_quant/core/data/`：`table_meta`、`query`、`kline`；CLI `data query` / `data kline`
 - Web 组件：CandlestickChart、DataTable、`dataApi.ts`；导航「数据浏览」入口

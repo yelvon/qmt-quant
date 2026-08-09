@@ -33,6 +33,7 @@ export default function SettingsPage() {
       dry_run: settings.trade?.dry_run,
       commission_rate: settings.backtest?.commission_rate,
       stamp_tax_rate: settings.backtest?.stamp_tax_rate,
+      sync_auto_repair: settings.data?.sync?.auto_repair,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -103,6 +104,22 @@ export default function SettingsPage() {
             onChange={(e) => patch(["trade", "dry_run"], e.target.checked)}
           />
           默认模拟下单
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.data?.sync?.auto_repair === true}
+            onChange={(e) => {
+              setSettings((s: any) => ({
+                ...s,
+                data: {
+                  ...s.data,
+                  sync: { ...(s.data?.sync || {}), auto_repair: e.target.checked },
+                },
+              }));
+            }}
+          />
+          增量同步后自动修复数据缺口
         </label>
         <div className="flex flex-wrap gap-2">
           <button className="btn-primary" onClick={save}>

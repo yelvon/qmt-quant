@@ -85,30 +85,62 @@ def sync_financial(
         help="Comma-separated table names",
     ),
     sector: str = typer.Option("沪深A股"),
+    full: bool = typer.Option(False, help="Full re-download (disable incremental)"),
 ) -> None:
     from qmt_quant.core.sync.financial import sync_financial as _sync
 
     table_list = [t.strip() for t in tables.split(",") if t.strip()]
-    stats = _sync(sector=sector, tables=table_list)
+    stats = _sync(sector=sector, tables=table_list, incremental=not full)
     typer.echo(json.dumps(stats, ensure_ascii=False, indent=2))
 
 
 @sync_app.command("calendar")
-def sync_calendar_cmd() -> None:
-    from qmt_quant.core.sync.calendar import sync_calendar_from_bars
+def sync_calendar_cmd(
+    from_qmt: bool = typer.Option(True, help="Sync from QMT trading dates"),
+) -> None:
+    if from_qmt:
+        from qmt_quant.core.sync.calendar import sync_calendar_from_qmt
 
-    count = sync_calendar_from_bars()
-    typer.echo(f"Synced trade calendar from bars: {count} dates")
+        count = sync_calendar_from_qmt()
+    else:
+        from qmt_quant.core.sync.calendar import sync_calendar_from_bars
+
+        count = sync_calendar_from_bars()
+    typer.echo(f"Synced trade calendar: {count} dates")
 
 
 @sync_app.command("check")
 def sync_check(
     date: Optional[str] = typer.Option(None, help="As-of date YYYY-MM-DD"),
     adjust: str = typer.Option("front"),
+    sector: str = typer.Option("沪深A股"),
+    detailed: bool = typer.Option(False, help="Run detailed gap scan"),
+    repair: bool = typer.Option(False, help="Repair after check if needed"),
 ) -> None:
     from qmt_quant.core.sync.check import run_data_check
+    from qmt_quant.core.sync.repair import run_check_and_repair
 
-    result = run_data_check(as_of_date=date, adjust_type=adjust)
+    if repair:
+        result = run_check_and_repair(sector=sector, adjust_type=adjust, detailed=True)
+    else:
+        result = run_data_check(
+            as_of_date=date, adjust_type=adjust, sector=sector, detailed=detailed
+        )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@sync_app.command("repair")
+def sync_repair(
+    sector: str = typer.Option("沪深A股"),
+    adjust: str = typer.Option("front"),
+    codes: Optional[str] = typer.Option(None, help="Comma-separated codes"),
+) -> None:
+    from qmt_quant.core.sync.gaps import build_repair_plan
+    from qmt_quant.core.sync.repair import sync_bars_repair
+
+    code_list = [c.strip() for c in codes.split(",") if c.strip()] if codes else None
+    plan = build_repair_plan(sector=sector, adjust_type=adjust, codes=code_list)
+    result = sync_bars_repair(plan, sector=sector)
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
