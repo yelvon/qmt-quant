@@ -15,6 +15,8 @@ type Props = {
     bar_coverage_pct?: number;
     as_of?: string;
     needs_repair?: boolean;
+    universe_estimated?: boolean;
+    universe_total?: number;
     gap_summary?: { stale_count?: number };
     stale_codes?: string[];
   } | null;
@@ -35,7 +37,10 @@ export default function DataHealthPanel({ check, onRepair, repairing }: Props) {
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-400">
-          行情覆盖 {check.bar_coverage_pct ?? "—"}%
+          行情覆盖 {check.universe_estimated ? "—" : `${check.bar_coverage_pct ?? "—"}%`}
+          {!check.universe_estimated && check.universe_total
+            ? `（${check.universe_total} 只）`
+            : ""}
           {staleCount > 0 ? ` · 滞后 ${staleCount} 只` : ""}
           {check.as_of ? ` · 截至 ${check.as_of}` : ""}
         </p>
@@ -51,6 +56,11 @@ export default function DataHealthPanel({ check, onRepair, repairing }: Props) {
           />
         </div>
       </div>
+      {check.universe_estimated && (
+        <p className="mb-3 text-xs text-amber-300/90">
+          股票池规模尚未记录，覆盖率仅供参考。请先完成一次「更新今日数据」。
+        </p>
+      )}
       <ul className="space-y-2">
         {items.map((c) => (
           <li

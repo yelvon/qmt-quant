@@ -33,17 +33,26 @@ def run_data_check(
 
     with db_session() as conn:
         cov = coverage_stats(conn, adjust_type=adjust)
-        inst_count = conn.execute("SELECT COUNT(*) FROM instrument").fetchone()[0]
         checks: List[Dict[str, object]] = []
 
-        bar_codes = cov.get("codes", 0) or 0
+        bar_codes = int(gap_info.get("bar_codes_with_data") or cov.get("codes", 0) or 0)
+        universe_total = int(gap_info.get("universe_total") or bar_codes or 1)
+        universe_estimated = bool(gap_info.get("universe_estimated"))
         coverage_pct = float(gap_info.get("bar_coverage_pct", 0) or 0)
+        if universe_estimated:
+            detail = f"{bar_codes} 只股票有日线（股票池规模未知，请先同步）"
+            coverage_label = "—"
+            line_ok = False
+        else:
+            detail = f"{bar_codes}/{universe_total} 只股票有日线"
+            coverage_label = f"{coverage_pct}%"
+            line_ok = coverage_pct >= 90
         checks.append(
             {
                 "name": "日线是否齐全",
-                "ok": coverage_pct >= 90,
-                "coverage": f"{coverage_pct}%",
-                "detail": f"{bar_codes}/{inst_count} 只股票有日线",
+                "ok": line_ok,
+                "coverage": coverage_label,
+                "detail": detail,
             }
         )
 
@@ -142,6 +151,8 @@ def run_data_check(
             "adjust_type": adjust,
             "checks": checks,
             "bar_coverage_pct": coverage_pct,
+            "universe_total": universe_total,
+            "universe_estimated": universe_estimated,
             "quality": qstats,
             "freshness": freshness,
             "stale_codes": gap_info.get("stale_codes") or [],

@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost, useJobProgress } from "../lib/api";
+import React, { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../lib/api";
+import { useJobTracker } from "../lib/useJobTracker";
 import PageCallout from "../components/PageCallout";
 import JobProgressBar from "../components/JobProgressBar";
 import ActionCard from "../components/ActionCard";
@@ -12,45 +13,41 @@ type Action = { id: string; label: string; route: string; reason: string };
 
 export default function DashboardPage() {
   const [status, setStatus] = useState<any>(null);
-  const [jobId, setJobId] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [jobStatus, setJobStatus] = useState("");
-  const [jobError, setJobError] = useState<string | null>(null);
   const [step, setStep] = useState("");
   const [stepLabel, setStepLabel] = useState("");
   const [hideOnboarding, setHideOnboarding] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+
+  const job = useJobTracker();
 
   const refresh = () => apiGet("/api/status").then(setStatus);
   useEffect(() => {
     refresh();
   }, []);
 
-  const onJob = useCallback(
-    (data: Record<string, unknown>) => {
-      if (data.job_id === jobId) {
-        setProgress(Number(data.progress || 0));
-        setJobStatus(String(data.status || ""));
-        if (data.step) setStep(String(data.step));
-        if (data.step_label) setStepLabel(String(data.step_label));
-        if (data.error) setJobError(String(data.error));
-        if (data.status === "completed") {
-          refresh();
-          setJobError(null);
-        }
+  useEffect(() => {
+    if (job.status === "completed") refresh();
+  }, [job.status]);
+
+  useEffect(() => {
+    if (job.message && job.status === "running") {
+      if (job.message.includes("更新数据") || job.message.includes("同步")) {
+        setStep("sync");
+        setStepLabel(job.message);
       }
-    },
-    [jobId]
-  );
-  useJobProgress(onJob);
+    }
+  }, [job.message, job.status]);
 
   async function runPipeline() {
-    const res = await apiPost<{ job_id: string }>("/api/jobs/pipeline");
-    setJobId(res.job_id);
-    setProgress(0.05);
-    setJobStatus("running");
-    setJobError(null);
-    setStep("sync");
-    setStepLabel("更新数据");
+    setPipelineError(null);
+    try {
+      const res = await apiPost<{ job_id: string }>("/api/jobs/pipeline");
+      job.trackJob(res.job_id, "一键跑通：更新数据");
+      setStep("sync");
+      setStepLabel("更新数据");
+    } catch (err) {
+      setPipelineError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   const actions: Action[] = status?.actions || [];
@@ -84,20 +81,22 @@ export default function DashboardPage() {
         <p className="text-sm text-slate-400">
           行情覆盖 {status?.data_check?.bar_coverage_pct ?? "-"}%
         </p>
-        <button className="btn-primary mt-4" onClick={runPipeline}>
+        <button className="btn-primary mt-4" disabled={job.isRunning} onClick={runPipeline}>
           一键跑通
         </button>
-        {jobId && (
+        {pipelineError && <p className="mt-2 text-sm text-red-300">{pipelineError}</p>}
+        {job.jobId && (
           <>
             {stepLabel && <p className="mt-2 text-sm text-slate-400">{stepLabel}</p>}
-            <StepProgress currentStep={step} progress={progress} />
+            <StepProgress currentStep={step} progress={job.progress} />
             <JobProgressBar
-              progress={progress}
-              status={jobStatus}
-              error={jobError}
-              message={stepLabel || undefined}
+              progress={job.progress}
+              status={job.status}
+              message={job.message}
+              error={job.error}
+              onCancel={job.isRunning ? () => job.cancelJob() : undefined}
               completeAction={
-                jobStatus === "completed"
+                job.status === "completed"
                   ? { label: "查看验证结果", to: "/validation" }
                   : undefined
               }

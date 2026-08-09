@@ -233,7 +233,17 @@ def analyze_gaps(
         inst_count = conn.execute("SELECT COUNT(*) FROM instrument").fetchone()[0]
         latest_map = latest_bar_dates(conn, adjust_type)
         bar_codes = len(latest_map)
-        coverage_pct = round((bar_codes / inst_count * 100), 1) if inst_count else 0.0
+
+        from qmt_quant.core.sync.universe_stats import resolve_universe_total
+
+        universe_total, universe_estimated = resolve_universe_total(
+            conn, sector, bar_codes=bar_codes
+        )
+        if universe_estimated:
+            coverage_pct = 0.0
+        else:
+            coverage_pct = round((bar_codes / universe_total * 100), 1) if universe_total else 0.0
+            coverage_pct = min(100.0, coverage_pct)
 
         lag_days = 0
         if market_latest and trade_dates:
@@ -241,7 +251,7 @@ def analyze_gaps(
             if market_latest < ref:
                 lag_days = _trading_day_lag(market_latest, ref, trade_dates)
 
-        stale_pct = round((stale_total / inst_count * 100), 2) if inst_count else 0.0
+        stale_pct = round((stale_total / universe_total * 100), 2) if universe_total else 0.0
         completeness_median = 0.0
         if detailed and stale_codes:
             sample = stale_codes[:50] + [c for c in load_watchlist() if c in latest_map][:20]
@@ -269,6 +279,9 @@ def analyze_gaps(
         return {
             "as_of": as_of,
             "adjust_type": adjust_type,
+            "universe_total": universe_total,
+            "universe_estimated": universe_estimated,
+            "bar_codes_with_data": bar_codes,
             "bar_coverage_pct": coverage_pct,
             "freshness": {
                 "market_latest": market_latest,

@@ -2,16 +2,46 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from qmt_quant.adapters.qmt.client import XtDataClient, to_qmt_date
 from qmt_quant.adapters.qmt.transform import bars_from_dataframe
 from qmt_quant.config import get_settings
+from qmt_quant.core.jobs.context import JobCancelled, is_job_cancelled, report_job_progress, sync_progress_message
 from qmt_quant.core.sync.gaps import RepairPlan, analyze_gaps, build_repair_plan
 from qmt_quant.core.sync.calendar import sync_calendar_from_bars, sync_calendar_from_qmt
 from qmt_quant.storage.bars import market_latest_date, upsert_bars
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.sync_meta import set_meta
+
+
+def _sync_progress(progress: float, processed: int, total: int) -> float:
+    if total <= 0:
+        return progress
+    return 0.05 + 0.90 * (processed / total)
+
+
+def _build_checkpoint(
+    *,
+    remaining_codes: Sequence[str],
+    processed: int,
+    total: int,
+    start: str,
+    end: str,
+    sector: str,
+    adjust_type: str,
+    mode: str,
+) -> Dict[str, Any]:
+    return {
+        "remaining_codes": list(remaining_codes),
+        "processed": processed,
+        "total": total,
+        "start": start,
+        "end": end,
+        "sector": sector,
+        "adjust_type": adjust_type,
+        "mode": mode,
+    }
 
 
 def _fetch_and_upsert(
@@ -23,17 +53,72 @@ def _fetch_and_upsert(
     adjust_type: str,
     dividend: str,
     batch_size: int,
+    *,
+    job_id: Optional[str] = None,
+    processed_base: int = 0,
+    total_codes: Optional[int] = None,
+    sector: str = "",
+    mode: str = "incremental",
+    on_batch_done: Optional[Callable[[int, int], None]] = None,
 ) -> int:
     written = 0
     code_list = list(codes)
+    total = total_codes if total_codes is not None else len(code_list)
     for i in range(0, len(code_list), batch_size):
+        if job_id and is_job_cancelled(job_id):
+            processed = processed_base + i
+            progress = _sync_progress(0.05, processed, total)
+            raise JobCancelled(
+                _build_checkpoint(
+                    remaining_codes=code_list[i:],
+                    processed=processed,
+                    total=total,
+                    start=start,
+                    end=end,
+                    sector=sector,
+                    adjust_type=adjust_type,
+                    mode=mode,
+                ),
+                progress=progress,
+                partial_result={"bars_written": written, "processed": processed},
+                message=f"已中断（{processed}/{total} 只股票）",
+            )
         chunk = code_list[i : i + batch_size]
-        client.download_history(
-            chunk,
-            period="1d",
-            start_time=to_qmt_date(start),
-            end_time=to_qmt_date(end),
-        )
+        if job_id:
+            for code in chunk:
+                if is_job_cancelled(job_id):
+                    processed = processed_base + i + chunk.index(code)
+                    progress = _sync_progress(0.05, processed, total)
+                    raise JobCancelled(
+                        _build_checkpoint(
+                            remaining_codes=code_list[i + chunk.index(code) :],
+                            processed=processed,
+                            total=total,
+                            start=start,
+                            end=end,
+                            sector=sector,
+                            adjust_type=adjust_type,
+                            mode=mode,
+                        ),
+                        progress=progress,
+                        partial_result={"bars_written": written, "processed": processed},
+                        message=sync_progress_message(
+                            processed, total, job_id=job_id, prefix="已中断"
+                        ),
+                    )
+                client.download_history(
+                    [code],
+                    period="1d",
+                    start_time=to_qmt_date(start),
+                    end_time=to_qmt_date(end),
+                )
+        else:
+            client.download_history(
+                chunk,
+                period="1d",
+                start_time=to_qmt_date(start),
+                end_time=to_qmt_date(end),
+            )
         data = client.get_market_bars(
             chunk,
             period="1d",
@@ -44,6 +129,16 @@ def _fetch_and_upsert(
         for code, df in data.items():
             rows = bars_from_dataframe(code, df, adjust_type=adjust_type)
             written += upsert_bars(conn, rows)
+        done = processed_base + min(i + batch_size, len(code_list))
+        if on_batch_done:
+            on_batch_done(done, total)
+        elif job_id:
+            progress = _sync_progress(0.05, done, total)
+            report_job_progress(
+                job_id,
+                progress,
+                sync_progress_message(done, total, job_id=job_id, progress=progress),
+            )
     return written
 
 
@@ -51,6 +146,7 @@ def sync_bars_repair(
     plan: RepairPlan,
     *,
     sector: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, object]:
     run_migrations()
     settings = get_settings()
@@ -65,6 +161,7 @@ def sync_bars_repair(
 
     written = 0
     ranges = plan.date_ranges or [{"start": "", "end": ""}]
+    sector_name = sector or plan.sector or settings.default_sector
     with db_session() as conn:
         for dr in ranges:
             start, end = dr.get("start", ""), dr.get("end", "")
@@ -79,6 +176,9 @@ def sync_bars_repair(
                 adjust_type,
                 dividend,
                 settings.sync_batch_size,
+                job_id=job_id,
+                sector=sector_name,
+                mode="repair",
             )
         market_latest = market_latest_date(conn, adjust_type)
         if market_latest:
@@ -90,7 +190,7 @@ def sync_bars_repair(
         sync_calendar_from_bars()
 
     result: Dict[str, object] = {
-        "sector": sector or plan.sector,
+        "sector": sector_name,
         "codes": len(codes),
         "date_ranges": ranges,
         "bars_written": written,
@@ -110,6 +210,7 @@ def run_check_and_repair(
     adjust_type: str = "front",
     detailed: bool = True,
     codes: Optional[Sequence[str]] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, object]:
     check = analyze_gaps(sector=sector, adjust_type=adjust_type, detailed=detailed)
     if not check.get("needs_repair") and not codes:
@@ -119,6 +220,6 @@ def run_check_and_repair(
         plan = build_repair_plan(sector=sector, adjust_type=adjust_type, codes=list(codes))
     else:
         plan = RepairPlan.from_dict(check.get("repair_plan") or {})
-    repair = sync_bars_repair(plan, sector=sector)
+    repair = sync_bars_repair(plan, sector=sector, job_id=job_id)
     post_check = analyze_gaps(sector=sector, adjust_type=adjust_type, detailed=detailed)
     return {"check": check, "repair": repair, "post_check": post_check}

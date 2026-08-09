@@ -14,7 +14,16 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : "{}",
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const obj = JSON.parse(text);
+      throw new Error(obj.detail || text);
+    } catch (e) {
+      if (e instanceof Error && e.message !== text) throw e;
+      throw new Error(text);
+    }
+  }
   return res.json();
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Dict, List, Optional, Set
 
@@ -14,8 +15,18 @@ from qmt_quant.core.data.kline import build_kline_payload
 from qmt_quant.core.data.query import get_date_range, list_available_adjust_types, query_table
 from qmt_quant.core.data.table_meta import get_table_meta, list_tables
 from qmt_quant.core.doctor import run_doctor
-from qmt_quant.core.jobs.runner import fetch_job, list_recent_jobs, submit_job, subscribe
+from qmt_quant.core.jobs.errors import ConcurrentJobError
+from qmt_quant.core.jobs.runner import (
+    fetch_job,
+    list_recent_jobs,
+    recover_stale_jobs,
+    request_cancel_job,
+    resume_job,
+    submit_job,
+    subscribe,
+)
 from qmt_quant.core.presets import resolve_range_preset
+from qmt_quant.core.qmt_health import check_qmt_connection
 from qmt_quant.core.research.presets import (
     FEE_PRESETS,
     LONG_MA_PRESETS,
@@ -144,17 +155,23 @@ class JobManager:
 
 
 job_manager = JobManager()
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _main_loop
+    _main_loop = loop
 
 
 def _on_job_update(job_id: str, payload: Dict[str, Any]) -> None:
-    import asyncio
+    loop = _main_loop
+    if loop is None or not loop.is_running():
+        return
 
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(job_manager.broadcast(job_id, payload))
-    except RuntimeError:
-        pass
+    def _schedule() -> None:
+        asyncio.create_task(job_manager.broadcast(job_id, payload))
+
+    loop.call_soon_threadsafe(_schedule)
 
 
 subscribe(_on_job_update)
@@ -162,6 +179,7 @@ subscribe(_on_job_update)
 
 def create_app() -> FastAPI:
     run_migrations()
+    recover_stale_jobs()
     app = FastAPI(title="qmt-quant", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -170,6 +188,21 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.on_event("startup")
+    async def _capture_event_loop() -> None:
+        set_main_loop(asyncio.get_running_loop())
+
+    def _require_qmt(sector: str = "沪深A股") -> None:
+        ok, msg = check_qmt_connection(sector)
+        if not ok:
+            raise HTTPException(status_code=503, detail=msg)
+
+    def _submit_job_safe(**kwargs: Any) -> str:
+        try:
+            return submit_job(**kwargs)
+        except ConcurrentJobError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/status")
     def api_status() -> Dict[str, Any]:
@@ -286,8 +319,14 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/qmt/status")
+    def api_qmt_status(sector: str = "沪深A股") -> Dict[str, Any]:
+        ok, msg = check_qmt_connection(sector)
+        return {"ok": ok, "message": msg}
+
     @app.post("/api/jobs/sync/bars")
     def job_sync_bars(body: SyncBarsBody) -> Dict[str, str]:
+        _require_qmt(body.sector)
         params: Dict[str, Any] = {
             "sector": body.sector,
             "incremental": body.incremental,
@@ -298,7 +337,7 @@ def create_app() -> FastAPI:
             start, _ = resolve_range_preset(body.range_preset)
             params["start_date"] = start
             params["incremental"] = False
-        job_id = submit_job(
+        job_id = _submit_job_safe(
             display_name="更新行情",
             job_type="sync_bars",
             env="qmt",
@@ -308,7 +347,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/sync/financial")
     def job_sync_financial(body: SyncFinancialBody) -> Dict[str, str]:
-        job_id = submit_job(
+        _require_qmt(body.sector)
+        job_id = _submit_job_safe(
             display_name="同步财报",
             job_type="sync_financial",
             env="qmt",
@@ -322,7 +362,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/sync/repair")
     def job_sync_repair(body: SyncRepairBody) -> Dict[str, str]:
-        job_id = submit_job(
+        _require_qmt(body.sector)
+        job_id = _submit_job_safe(
             display_name="修复数据缺口",
             job_type="sync_repair",
             env="qmt",
@@ -336,7 +377,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/sync/check-repair")
     def job_sync_check_repair(body: SyncCheckRepairBody) -> Dict[str, str]:
-        job_id = submit_job(
+        _require_qmt(body.sector)
+        job_id = _submit_job_safe(
             display_name="检查并修复数据",
             job_type="sync_check_repair",
             env="qmt",
@@ -490,6 +532,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/pipeline")
     def job_pipeline() -> Dict[str, str]:
+        _require_qmt()
         job_id = submit_job(
             display_name="一键跑通",
             job_type="pipeline",
@@ -501,7 +544,31 @@ def create_app() -> FastAPI:
     @app.get("/api/jobs/{job_id}")
     def api_job(job_id: str) -> Dict[str, Any]:
         job = fetch_job(job_id)
-        return job or {"error": "not_found"}
+        if not job:
+            raise HTTPException(status_code=404, detail="not_found")
+        return job
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def api_job_cancel(job_id: str) -> Dict[str, Any]:
+        job = fetch_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="not_found")
+        if job.get("status") != "running":
+            raise HTTPException(status_code=400, detail="job_not_running")
+        if not request_cancel_job(job_id):
+            raise HTTPException(status_code=400, detail="cancel_failed")
+        return {"ok": True, "job_id": job_id}
+
+    @app.post("/api/jobs/{job_id}/resume")
+    def api_job_resume(job_id: str) -> Dict[str, str]:
+        job = fetch_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="not_found")
+        try:
+            new_id = resume_job(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"job_id": new_id}
 
     @app.post("/api/jobs/{job_id}/retry")
     def api_job_retry(job_id: str) -> Dict[str, str]:

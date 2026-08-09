@@ -9,6 +9,18 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from qmt_quant.config import get_settings
+from qmt_quant.core.jobs.errors import ConcurrentJobError
+from qmt_quant.core.jobs.context import (
+    JobCancelled,
+    cancel_job,
+    is_job_cancelled,
+    job_execution,
+    report_job_progress,
+    request_job_cancel,
+    subscribe_progress,
+    sync_progress_message,
+)
+from qmt_quant.core.qmt_health import ensure_qmt_ready
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import create_job, get_job, update_job
 
@@ -16,6 +28,24 @@ JobHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
 
 _HANDLERS: Dict[str, JobHandler] = {}
 _SUBSCRIBERS: List[Callable[[str, Dict[str, Any]], None]] = []
+
+QMT_JOB_TYPES = frozenset({"sync_bars", "sync_financial", "sync_repair", "sync_check_repair"})
+QMT_SYNC_TYPES = QMT_JOB_TYPES
+
+
+def _find_running_qmt_job(conn) -> Optional[Dict[str, Any]]:
+    placeholders = ",".join("?" * len(QMT_SYNC_TYPES))
+    row = conn.execute(
+        f"""
+        SELECT id, display_name, job_type FROM job
+        WHERE status = 'running' AND job_type IN ({placeholders})
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        tuple(QMT_SYNC_TYPES),
+    ).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "display_name": row[1], "job_type": row[2]}
 
 
 def subscribe(callback: Callable[[str, Dict[str, Any]], None]) -> None:
@@ -28,6 +58,9 @@ def _notify(job_id: str, payload: Dict[str, Any]) -> None:
             cb(job_id, payload)
         except Exception:
             pass
+
+
+subscribe_progress(_notify)
 
 
 def register_handler(job_type: str, handler: JobHandler) -> None:
@@ -51,6 +84,22 @@ def _use_subprocess(env: str) -> bool:
     return py != sys.executable and bool(py)
 
 
+def recover_stale_jobs() -> int:
+    """Mark orphaned running jobs as failed after API restart."""
+    with db_session() as conn:
+        cur = conn.execute(
+            """
+            UPDATE job
+            SET status = 'failed',
+                progress = 1.0,
+                error_message = '服务重启导致任务中断，请重新同步',
+                finished_at = datetime('now')
+            WHERE status = 'running'
+            """
+        )
+        return cur.rowcount
+
+
 def submit_job(
     *,
     display_name: str,
@@ -61,6 +110,10 @@ def submit_job(
 ) -> str:
     run_migrations()
     with db_session() as conn:
+        if job_type in QMT_SYNC_TYPES:
+            running = _find_running_qmt_job(conn)
+            if running:
+                raise ConcurrentJobError(running["id"], running["display_name"])
         job_id = create_job(
             conn,
             display_name=display_name,
@@ -78,29 +131,131 @@ def submit_job(
     return job_id
 
 
+def request_cancel_job(job_id: str) -> bool:
+    ok = request_job_cancel(job_id)
+    if ok:
+        _notify(
+            job_id,
+            {
+                "status": "running",
+                "progress": 0.0,
+                "message": "正在中断，等待当前批次结束…",
+                "cancelling": True,
+            },
+        )
+    return ok
+
+
+def resume_job(job_id: str) -> str:
+    job = fetch_job(job_id)
+    if not job:
+        raise ValueError("not_found")
+    if job.get("status") != "cancelled":
+        raise ValueError("job_not_resumable")
+    result = job.get("result_json") or {}
+    checkpoint = result.get("checkpoint")
+    if not checkpoint:
+        raise ValueError("no_checkpoint")
+    params = dict(job.get("params_json") or {})
+    params["resume_checkpoint"] = checkpoint
+    sector = str(checkpoint.get("sector") or params.get("sector") or "沪深A股")
+    if job.get("job_type") in QMT_JOB_TYPES:
+        ensure_qmt_ready(sector)
+    display = job.get("display_name", "继续任务")
+    if "续传" not in display:
+        display = f"{display}（续传）"
+    return submit_job(
+        display_name=display,
+        job_type=str(job.get("job_type", "")),
+        env=str(job.get("env", "quant")),
+        params=params,
+    )
+
+
 def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -> None:
-    with db_session() as conn:
-        update_job(conn, job_id, status="running", progress=0.05)
-    _notify(job_id, {"status": "running", "progress": 0.05})
-    try:
-        if _use_subprocess(env):
-            result = _run_subprocess(job_type, env, params)
-        else:
-            handler = _HANDLERS.get(job_type)
-            if handler is None:
-                if job_type == "pipeline":
-                    result = run_pipeline(params, job_id=job_id)
-                else:
-                    result = _dispatch_builtin(job_type, params)
+    with job_execution(job_id):
+        with db_session() as conn:
+            update_job(
+                conn,
+                job_id,
+                status="running",
+                progress=0.05,
+                progress_message="任务已启动…",
+            )
+        _notify(
+            job_id,
+            {"status": "running", "progress": 0.05, "message": "任务已启动…"},
+        )
+        try:
+            work_params = dict(params)
+            work_params["job_id"] = job_id
+            if _use_subprocess(env):
+                result = _run_subprocess(job_type, env, work_params)
             else:
-                result = handler(params)
-        with db_session() as conn:
-            update_job(conn, job_id, status="completed", progress=1.0, result=result)
-        _notify(job_id, {"status": "completed", "progress": 1.0, "result": result})
-    except Exception as exc:
-        with db_session() as conn:
-            update_job(conn, job_id, status="failed", progress=1.0, error=str(exc))
-        _notify(job_id, {"status": "failed", "progress": 1.0, "error": str(exc)})
+                handler = _HANDLERS.get(job_type)
+                if handler is None:
+                    if job_type == "pipeline":
+                        result = run_pipeline(work_params, job_id=job_id)
+                    else:
+                        result = _dispatch_builtin(job_type, work_params)
+                else:
+                    result = handler(work_params)
+            with db_session() as conn:
+                update_job(
+                    conn,
+                    job_id,
+                    status="completed",
+                    progress=1.0,
+                    progress_message="已完成",
+                    result=result,
+                )
+            _notify(
+                job_id,
+                {
+                    "status": "completed",
+                    "progress": 1.0,
+                    "message": "已完成",
+                    "result": result,
+                },
+            )
+        except JobCancelled as exc:
+            result = {
+                "cancelled": True,
+                "checkpoint": exc.checkpoint,
+                **exc.partial_result,
+            }
+            with db_session() as conn:
+                update_job(
+                    conn,
+                    job_id,
+                    status="cancelled",
+                    progress=exc.progress,
+                    progress_message=exc.message,
+                    result=result,
+                )
+            _notify(
+                job_id,
+                {
+                    "status": "cancelled",
+                    "progress": exc.progress,
+                    "message": exc.message,
+                    "result": result,
+                },
+            )
+        except Exception as exc:
+            with db_session() as conn:
+                update_job(
+                    conn,
+                    job_id,
+                    status="failed",
+                    progress=1.0,
+                    progress_message="失败",
+                    error=str(exc),
+                )
+            _notify(
+                job_id,
+                {"status": "failed", "progress": 1.0, "error": str(exc), "message": "失败"},
+            )
 
 
 def _run_subprocess(job_type: str, env: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -142,7 +297,7 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
                 adjust_type=params.get("adjust_type", "front"),
                 codes=codes,
             )
-        return sync_bars_repair(plan, sector=params.get("sector"))
+        return sync_bars_repair(plan, sector=params.get("sector"), job_id=params.get("job_id"))
     if job_type == "sync_check_repair":
         from qmt_quant.core.sync.repair import run_check_and_repair
 
@@ -190,12 +345,7 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
     def _step(progress: float, step: str, step_label: str) -> None:
         if not job_id:
             return
-        with db_session() as conn:
-            update_job(conn, job_id, progress=progress)
-        _notify(
-            job_id,
-            {"status": "running", "progress": progress, "step": step, "step_label": step_label},
-        )
+        report_job_progress(job_id, progress, step_label, step=step, step_label=step_label)
 
     out: Dict[str, Any] = {}
     try:
@@ -203,6 +353,7 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
         out["sync"] = sync_bars(
             incremental=True,
             incremental_days=params.get("days", get_settings().sync_incremental_days),
+            job_id=job_id,
         )
     except Exception as exc:
         raise RuntimeError(f"[sync] {exc}") from exc

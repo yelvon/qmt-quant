@@ -38,6 +38,7 @@ def update_job(
     *,
     status: Optional[str] = None,
     progress: Optional[float] = None,
+    progress_message: Optional[str] = None,
     result: Optional[Dict[str, Any]] = None,
     error: Optional[str] = None,
 ) -> None:
@@ -48,11 +49,14 @@ def update_job(
         params.append(status)
         if status == "running":
             fields.append("started_at = datetime('now')")
-        if status in ("completed", "failed"):
+        if status in ("completed", "failed", "cancelled"):
             fields.append("finished_at = datetime('now')")
     if progress is not None:
         fields.append("progress = ?")
         params.append(progress)
+    if progress_message is not None:
+        fields.append("progress_message = ?")
+        params.append(progress_message)
     if result is not None:
         fields.append("result_json = ?")
         params.append(json.dumps(result, ensure_ascii=False))

@@ -60,21 +60,40 @@ jobs:
 
 ### 方式一：一键脚本（推荐）
 
-在项目根目录执行，自动启动 API + 前端并打开浏览器：
+在项目根目录执行，自动启动 API + 前端并打开浏览器。
+
+**PowerShell / CMD（Windows 默认终端）**
 
 ```powershell
 .\start.bat
 # 或
 .\scripts\start.ps1
+.\scripts\start.ps1 -Restart    # 代码更新后：先停再起
+.\scripts\start.ps1 -Stop
+.\scripts\start.ps1 -Install
+.\scripts\start.ps1 -NoBrowser
 ```
 
-常用参数：
+**Git Bash / MSYS（MINGW64）**
 
-| 参数 | 说明 |
-|------|------|
-| `-Install` | 强制重新执行 `npm install` |
-| `-NoBrowser` | 不自动打开浏览器 |
-| `-Stop` | 停止 8788 / 5173 端口上的服务 |
+```bash
+./start.sh
+# 或
+./scripts/start.sh
+./scripts/start.sh --restart    # 代码更新后：先停再起
+./scripts/start.sh --stop
+./scripts/start.sh --install
+./scripts/start.sh --no-browser
+```
+
+> Git Bash 下请用 **正斜杠** `./scripts/start.sh`，不要用 `.\scripts\start.ps1`（那是 PowerShell 脚本）。
+
+| PowerShell 参数 | Git Bash 参数 | 说明 |
+|-----------------|---------------|------|
+| `-Install` | `--install` | 强制重新执行 `npm install` |
+| `-NoBrowser` | `--no-browser` | 不自动打开浏览器 |
+| `-Stop` | `--stop` | 停止 8788 / 5173 端口上的服务 |
+| `-Restart` | `--restart` | 先停止再启动（代码更新后请用此参数） |
 
 访问地址：前端 http://localhost:5173 ，API http://127.0.0.1:8788
 
@@ -202,7 +221,8 @@ data:
 
 | 现象 | 处理 |
 |------|------|
-| 页面打不开 / 一直加载 | 确认两个终端（或启动脚本弹出的 API、前端窗口）都在运行；执行 `.\scripts\start.ps1 -Stop` 后重新启动 |
+| 页面打不开 / 一直加载 | 确认两个终端（或启动脚本弹出的 API、前端窗口）都在运行；执行 `.\scripts\start.ps1 -Stop` 或 `./scripts/start.sh --stop` 后重新启动 |
+| 脚本提示启动失败 | 查看 `logs/api.log`、`logs/web.log` 及弹出的 PowerShell 窗口；确认 Node.js / Python 路径正确 |
 | 接口报错 / 502 | 后端 API 未启动或 8788 被占用；检查 API 窗口日志 |
 | 数据同步失败 | QMT 客户端是否已登录；`设置` 页 doctor 是否全部通过 |
 | 只想本机访问 | 默认绑定 `127.0.0.1`，不对外网开放；无需改防火墙 |

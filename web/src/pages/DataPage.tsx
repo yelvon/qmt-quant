@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiGet, apiPost, useJobProgress } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
+import { parseApiError } from "../lib/errorMessages";
+import { useJobTracker } from "../lib/useJobTracker";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
@@ -30,76 +32,144 @@ export default function DataPage() {
   const [financialFull, setFinancialFull] = useState(false);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [check, setCheck] = useState<any>(null);
-  const [jobId, setJobId] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("");
-  const [jobError, setJobError] = useState<string | null>(null);
+  const [qmtOk, setQmtOk] = useState<boolean | null>(null);
+  const [qmtMessage, setQmtMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [jobKind, setJobKind] = useState<"sync" | "repair" | "other">("sync");
+
+  const job = useJobTracker();
 
   const refreshCheck = useCallback(() => {
     return apiGet(checkUrl(sector, adjust)).then(setCheck);
   }, [sector, adjust]);
 
+  const refreshQmt = useCallback(() => {
+    return apiGet<{ ok: boolean; message: string }>(
+      `/api/qmt/status?sector=${encodeURIComponent(sector)}`
+    ).then((res) => {
+      setQmtOk(res.ok);
+      setQmtMessage(res.message);
+    });
+  }, [sector]);
+
   useEffect(() => {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
     refreshCheck();
-  }, [refreshCheck]);
+    refreshQmt();
+  }, [refreshCheck, refreshQmt]);
 
-  const onJob = useCallback(
-    (data: Record<string, unknown>) => {
-      if (data.job_id === jobId) {
-        setProgress(Number(data.progress || 0));
-        setStatus(String(data.status || ""));
-        if (data.error) setJobError(String(data.error));
-        if (data.status === "completed") {
-          refreshCheck();
-          setJobError(null);
-        }
-      }
-    },
-    [jobId, refreshCheck]
-  );
-  useJobProgress(onJob);
+  useEffect(() => {
+    if (job.status === "completed") {
+      refreshCheck();
+      refreshQmt();
+    }
+  }, [job.status, refreshCheck, refreshQmt]);
+
+  async function startJobRequest(
+    path: string,
+    body?: unknown,
+    message = "同步任务已启动…",
+    kind: "sync" | "repair" | "other" = "sync"
+  ) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await apiPost<{ job_id: string }>(path, body);
+      setJobKind(kind);
+      job.trackJob(res.job_id, message);
+    } catch (err) {
+      setSubmitError(parseApiError(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function syncBars(incremental: boolean) {
-    const res = await apiPost<{ job_id: string }>("/api/jobs/sync/bars", {
-      sector,
-      incremental,
-      days: 5,
-      adjust,
-      range_preset: incremental ? undefined : rangePreset || undefined,
-    });
-    setJobId(res.job_id);
-    setJobError(null);
+    await startJobRequest(
+      "/api/jobs/sync/bars",
+      {
+        sector,
+        incremental,
+        days: 5,
+        adjust,
+        range_preset: incremental ? undefined : rangePreset || undefined,
+      },
+      incremental ? "增量同步中…" : "全量同步中…"
+    );
   }
 
   async function syncFinancial() {
-    const res = await apiPost<{ job_id: string }>("/api/jobs/sync/financial", {
-      sector,
-      incremental: !financialFull,
-    });
-    setJobId(res.job_id);
+    await startJobRequest(
+      "/api/jobs/sync/financial",
+      { sector, incremental: !financialFull },
+      "同步财报中…"
+    );
   }
 
   async function exportCatalog() {
-    const res = await apiPost<{ job_id: string }>("/api/jobs/catalog/export");
-    setJobId(res.job_id);
+    await startJobRequest("/api/jobs/catalog/export", undefined, "导出验策略文件中…", "other");
   }
 
   async function checkRepair() {
-    const res = await apiPost<{ job_id: string }>("/api/jobs/sync/check-repair", {
-      sector,
-      adjust,
-      detailed: true,
-    });
-    setJobId(res.job_id);
-    setJobError(null);
+    await startJobRequest(
+      "/api/jobs/sync/check-repair",
+      { sector, adjust, detailed: true },
+      "检查并修复数据中…",
+      "repair"
+    );
   }
+
+  async function handleCancel() {
+    setCancelling(true);
+    setSubmitError(null);
+    try {
+      await job.cancelJob();
+    } catch (err) {
+      setSubmitError(parseApiError(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleResume() {
+    setResuming(true);
+    setSubmitError(null);
+    try {
+      await job.resumeJob();
+    } catch (err) {
+      setSubmitError(parseApiError(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setResuming(false);
+    }
+  }
+
+  const syncDisabled = submitting || job.isRunning || qmtOk === false;
 
   return (
     <div>
       <PageCallout>
         Primary =「更新今日数据」（近 5 日增量）。若健康检查提示缺口，使用「一键修复」定向补洞。
+        同步前会自动检查 QMT 连接；进行中可「中断同步」，之后可「断点续传」。
       </PageCallout>
+      {qmtOk === false && (
+        <div className="mb-4 rounded-lg border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
+          <p className="font-medium">QMT 未就绪，无法开始同步</p>
+          <p className="mt-1 text-amber-200/80">{qmtMessage}</p>
+          <p className="mt-2 text-xs text-amber-200/70">
+            请确认 MiniQMT 已登录后，
+            <button type="button" className="underline" onClick={() => refreshQmt()}>
+              重新检测
+            </button>
+            ，或前往 <Link to="/settings" className="underline">设置</Link> 检查 Python 路径。
+          </p>
+        </div>
+      )}
+      {qmtOk === true && (
+        <p className="mb-4 text-xs text-emerald-400/90">{qmtMessage}</p>
+      )}
       <p className="mb-4 text-sm text-slate-400">
         <Link to="/data/browse" className="text-emerald-400 hover:underline">
           查看已同步数据 →
@@ -110,19 +180,26 @@ export default function DataPage() {
         <PresetSelect label="复权" value={adjust} options={ADJUST_OPTIONS} onChange={setAdjust} />
         <PresetSelect label="历史长度" value={rangePreset} options={RANGE_OPTIONS} onChange={setRangePreset} />
         <div className="flex flex-wrap items-end gap-2 lg:col-span-3">
-          <button className="btn-primary" onClick={() => syncBars(true)}>
+          <button className="btn-primary" disabled={syncDisabled} onClick={() => syncBars(true)}>
             更新今日数据
           </button>
-          <button className="btn-secondary" onClick={() => syncBars(false)}>
+          <button className="btn-secondary" disabled={syncDisabled} onClick={() => syncBars(false)}>
             全量同步
           </button>
-          <button className="btn-secondary" onClick={syncFinancial}>
+          <button className="btn-secondary" disabled={syncDisabled} onClick={syncFinancial}>
             同步财报{financialFull ? "（全量）" : "（增量）"}
           </button>
-          <button className="btn-secondary" onClick={exportCatalog}>
+          <button
+            className="btn-secondary"
+            disabled={submitting || job.isRunning}
+            onClick={exportCatalog}
+          >
             导出验策略文件
           </button>
         </div>
+        {submitError && (
+          <p className="text-sm text-red-300 lg:col-span-3">{submitError}</p>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-400 lg:col-span-3">
           <input
             type="checkbox"
@@ -131,12 +208,19 @@ export default function DataPage() {
           />
           财报全量重拉（默认增量，仅拉新披露）
         </label>
-        {jobId && (
+        {job.jobId && (
           <JobProgressBar
-            progress={progress}
-            status={status}
-            error={jobError}
-            completeAction={status === "completed" ? { label: "去试策略", to: "/research" } : undefined}
+            progress={job.progress}
+            status={job.status}
+            message={job.message}
+            error={job.error}
+            canResume={job.canResume}
+            cancelling={job.cancelling || cancelling}
+            resuming={resuming}
+            etaSeconds={job.etaSeconds}
+            onCancel={handleCancel}
+            onResume={handleResume}
+            completeAction={job.status === "completed" ? { label: "去试策略", to: "/research" } : undefined}
           />
         )}
       </div>
@@ -145,7 +229,7 @@ export default function DataPage() {
         <DataHealthPanel
           check={check}
           onRepair={checkRepair}
-          repairing={status === "running" && !!jobId}
+          repairing={jobKind === "repair" && job.isRunning}
         />
       </div>
     </div>

@@ -32,9 +32,21 @@ export function jobStatusLabel(status?: string): string {
       return "已完成";
     case "failed":
       return "失败";
+    case "cancelled":
+      return "已中断";
     case "pending":
       return "等待中";
     default:
       return status || "等待中";
   }
+}
+
+export function parseApiError(raw: string): string {
+  try {
+    const obj = JSON.parse(raw);
+    if (obj?.detail) return String(obj.detail);
+  } catch {
+    /* plain text */
+  }
+  return raw;
 }

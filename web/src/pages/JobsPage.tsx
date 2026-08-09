@@ -28,7 +28,12 @@ export default function JobsPage() {
   async function retry(jobId: string) {
     setRetrying(jobId);
     try {
-      await apiPost(`/api/jobs/${jobId}/retry`);
+      const job = jobs.find((j) => j.id === jobId);
+      if (job?.status === "cancelled" && job?.result_json?.checkpoint) {
+        await apiPost(`/api/jobs/${jobId}/resume`);
+      } else {
+        await apiPost(`/api/jobs/${jobId}/retry`);
+      }
       await load();
     } finally {
       setRetrying(null);
@@ -76,6 +81,16 @@ export default function JobsPage() {
                         onClick={() => retry(j.id)}
                       >
                         重试
+                      </button>
+                    )}
+                    {j.status === "cancelled" && j.result_json?.checkpoint && (
+                      <button
+                        type="button"
+                        className="text-xs text-emerald-400 hover:underline"
+                        disabled={retrying === j.id}
+                        onClick={() => retry(j.id)}
+                      >
+                        续传
                       </button>
                     )}
                   </td>
