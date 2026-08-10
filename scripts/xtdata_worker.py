@@ -86,10 +86,23 @@ def _cmd_get_instrument_detail(xtdata, params):
 
 def _cmd_download_history(xtdata, params):
     _ensure_connect(xtdata)
-    codes = params.get("codes") or []
+    codes = list(params.get("codes") or [])
     period = params.get("period", "1d")
     start_time = params.get("start_time", "")
     end_time = params.get("end_time", "")
+    if not codes:
+        return {"success": 0, "failed": 0, "failed_codes": []}
+    if hasattr(xtdata, "download_history_data2"):
+        try:
+            xtdata.download_history_data2(
+                stock_list=codes,
+                period=period,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            return {"success": len(codes), "failed": 0, "failed_codes": []}
+        except Exception:
+            pass
     ok, failed = 0, []
     for code in codes:
         try:

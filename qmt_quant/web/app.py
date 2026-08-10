@@ -243,8 +243,18 @@ def create_app() -> FastAPI:
         detailed: bool = False,
         sector: str = "沪深A股",
         adjust: str = "front",
+        refresh: bool = False,
     ) -> Dict[str, Any]:
-        return run_data_check(sector=sector, adjust_type=adjust, detailed=detailed)
+        if refresh:
+            from qmt_quant.core.sync.check import clear_data_check_cache
+
+            clear_data_check_cache()
+        return run_data_check(
+            sector=sector,
+            adjust_type=adjust,
+            detailed=detailed,
+            use_cache=not refresh,
+        )
 
     @app.get("/api/data/meta")
     def api_data_meta(table: str) -> Dict[str, Any]:
@@ -296,7 +306,17 @@ def create_app() -> FastAPI:
                 )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"ok": True, **result}
+        try:
+            meta = get_table_meta(table)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "table": table,
+            "view_mode": view_mode,
+            "columns": meta.get("columns", []),
+            **result,
+        }
 
     @app.get("/api/data/kline")
     def api_data_kline(
@@ -320,8 +340,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/qmt/status")
-    def api_qmt_status(sector: str = "沪深A股") -> Dict[str, Any]:
-        ok, msg = check_qmt_connection(sector)
+    def api_qmt_status(sector: str = "沪深A股", refresh: bool = False) -> Dict[str, Any]:
+        ok, msg = check_qmt_connection(sector, use_cache=not refresh)
         return {"ok": ok, "message": msg}
 
     @app.post("/api/jobs/sync/bars")

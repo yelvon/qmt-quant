@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { GlobalJobBanner, JobProvider } from "../lib/JobProvider";
 
 const mainLinks = [
   { to: "/", label: "① 总览" },
@@ -19,8 +20,9 @@ const secondaryLinks = [
 
 export default function Layout() {
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-slate-800 bg-slate-900/90 px-6 py-4">
+    <JobProvider>
+      <div className="min-h-screen">
+        <header className="border-b border-slate-800 bg-slate-900/90 px-6 py-4">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold text-emerald-400">qmt-quant</h1>
           <nav className="flex flex-wrap gap-1 text-sm">
@@ -52,9 +54,11 @@ export default function Layout() {
           </nav>
         </div>
       </header>
+      <GlobalJobBanner />
       <main className="mx-auto max-w-6xl px-6 py-6">
         <Outlet />
       </main>
     </div>
+    </JobProvider>
   );
 }

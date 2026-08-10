@@ -209,6 +209,10 @@ def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -
                     progress_message="已完成",
                     result=result,
                 )
+            if job_type in QMT_JOB_TYPES:
+                from qmt_quant.core.sync.check import clear_data_check_cache
+
+                clear_data_check_cache()
             _notify(
                 job_id,
                 {
@@ -243,15 +247,20 @@ def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -
                 },
             )
         except Exception as exc:
-            with db_session() as conn:
-                update_job(
-                    conn,
-                    job_id,
-                    status="failed",
-                    progress=1.0,
-                    progress_message="失败",
-                    error=str(exc),
-                )
+            from qmt_quant.storage.db_retry import run_db_retry
+
+            def _mark_failed() -> None:
+                with db_session() as conn:
+                    update_job(
+                        conn,
+                        job_id,
+                        status="failed",
+                        progress=1.0,
+                        progress_message="失败",
+                        error=str(exc),
+                    )
+
+            run_db_retry(_mark_failed)
             _notify(
                 job_id,
                 {"status": "failed", "progress": 1.0, "error": str(exc), "message": "失败"},

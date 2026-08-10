@@ -44,9 +44,44 @@ def _build_checkpoint(
     }
 
 
+def _raise_if_cancelled(
+    *,
+    job_id: Optional[str],
+    code_list: Sequence[str],
+    index: int,
+    processed_base: int,
+    total: int,
+    start: str,
+    end: str,
+    sector: str,
+    adjust_type: str,
+    mode: str,
+    written: int,
+    prefix: str = "已中断",
+) -> None:
+    if not job_id or not is_job_cancelled(job_id):
+        return
+    processed = processed_base + index
+    progress = _sync_progress(0.05, processed, total)
+    raise JobCancelled(
+        _build_checkpoint(
+            remaining_codes=code_list[index:],
+            processed=processed,
+            total=total,
+            start=start,
+            end=end,
+            sector=sector,
+            adjust_type=adjust_type,
+            mode=mode,
+        ),
+        progress=progress,
+        partial_result={"bars_written": written, "processed": processed},
+        message=sync_progress_message(processed, total, job_id=job_id, prefix=prefix),
+    )
+
+
 def _fetch_and_upsert(
     client: XtDataClient,
-    conn,
     codes: Sequence[str],
     start: str,
     end: str,
@@ -61,74 +96,62 @@ def _fetch_and_upsert(
     mode: str = "incremental",
     on_batch_done: Optional[Callable[[int, int], None]] = None,
 ) -> int:
+    """Download bars from QMT and upsert in short DB transactions (no long-held locks)."""
     written = 0
     code_list = list(codes)
     total = total_codes if total_codes is not None else len(code_list)
+    qmt_start = to_qmt_date(start)
+    qmt_end = to_qmt_date(end)
+
     for i in range(0, len(code_list), batch_size):
-        if job_id and is_job_cancelled(job_id):
-            processed = processed_base + i
-            progress = _sync_progress(0.05, processed, total)
-            raise JobCancelled(
-                _build_checkpoint(
-                    remaining_codes=code_list[i:],
-                    processed=processed,
-                    total=total,
-                    start=start,
-                    end=end,
-                    sector=sector,
-                    adjust_type=adjust_type,
-                    mode=mode,
-                ),
-                progress=progress,
-                partial_result={"bars_written": written, "processed": processed},
-                message=f"已中断（{processed}/{total} 只股票）",
-            )
+        _raise_if_cancelled(
+            job_id=job_id,
+            code_list=code_list,
+            index=i,
+            processed_base=processed_base,
+            total=total,
+            start=start,
+            end=end,
+            sector=sector,
+            adjust_type=adjust_type,
+            mode=mode,
+            written=written,
+        )
         chunk = code_list[i : i + batch_size]
+        done_before = processed_base + i
         if job_id:
-            for code in chunk:
-                if is_job_cancelled(job_id):
-                    processed = processed_base + i + chunk.index(code)
-                    progress = _sync_progress(0.05, processed, total)
-                    raise JobCancelled(
-                        _build_checkpoint(
-                            remaining_codes=code_list[i + chunk.index(code) :],
-                            processed=processed,
-                            total=total,
-                            start=start,
-                            end=end,
-                            sector=sector,
-                            adjust_type=adjust_type,
-                            mode=mode,
-                        ),
-                        progress=progress,
-                        partial_result={"bars_written": written, "processed": processed},
-                        message=sync_progress_message(
-                            processed, total, job_id=job_id, prefix="已中断"
-                        ),
-                    )
-                client.download_history(
-                    [code],
-                    period="1d",
-                    start_time=to_qmt_date(start),
-                    end_time=to_qmt_date(end),
-                )
-        else:
-            client.download_history(
-                chunk,
-                period="1d",
-                start_time=to_qmt_date(start),
-                end_time=to_qmt_date(end),
+            progress = _sync_progress(0.05, done_before, total)
+            report_job_progress(
+                job_id,
+                progress,
+                sync_progress_message(
+                    done_before,
+                    total,
+                    job_id=job_id,
+                    prefix="正在下载",
+                    progress=progress,
+                ),
             )
+
+        client.download_history(
+            chunk,
+            period="1d",
+            start_time=qmt_start,
+            end_time=qmt_end,
+        )
         data = client.get_market_bars(
             chunk,
             period="1d",
-            start_time=to_qmt_date(start),
-            end_time=to_qmt_date(end),
+            start_time=qmt_start,
+            end_time=qmt_end,
             dividend_type=dividend,
         )
-        for code, df in data.items():
-            rows = bars_from_dataframe(code, df, adjust_type=adjust_type)
-            written += upsert_bars(conn, rows)
+
+        with db_session() as conn:
+            for code, df in data.items():
+                rows = bars_from_dataframe(code, df, adjust_type=adjust_type)
+                written += upsert_bars(conn, rows)
+
         done = processed_base + min(i + batch_size, len(code_list))
         if on_batch_done:
             on_batch_done(done, total)
@@ -162,24 +185,24 @@ def sync_bars_repair(
     written = 0
     ranges = plan.date_ranges or [{"start": "", "end": ""}]
     sector_name = sector or plan.sector or settings.default_sector
+    for dr in ranges:
+        start, end = dr.get("start", ""), dr.get("end", "")
+        if not start or not end:
+            continue
+        written += _fetch_and_upsert(
+            client,
+            codes,
+            start,
+            end,
+            adjust_type,
+            dividend,
+            settings.sync_batch_size,
+            job_id=job_id,
+            sector=sector_name,
+            mode="repair",
+        )
+
     with db_session() as conn:
-        for dr in ranges:
-            start, end = dr.get("start", ""), dr.get("end", "")
-            if not start or not end:
-                continue
-            written += _fetch_and_upsert(
-                client,
-                conn,
-                codes,
-                start,
-                end,
-                adjust_type,
-                dividend,
-                settings.sync_batch_size,
-                job_id=job_id,
-                sector=sector_name,
-                mode="repair",
-            )
         market_latest = market_latest_date(conn, adjust_type)
         if market_latest:
             set_meta(conn, f"bars_market_latest:{adjust_type}", market_latest)
@@ -212,7 +235,12 @@ def run_check_and_repair(
     codes: Optional[Sequence[str]] = None,
     job_id: Optional[str] = None,
 ) -> Dict[str, object]:
-    check = analyze_gaps(sector=sector, adjust_type=adjust_type, detailed=detailed)
+    check = analyze_gaps(
+        sector=sector,
+        adjust_type=adjust_type,
+        detailed=detailed,
+        include_repair_plan=True,
+    )
     if not check.get("needs_repair") and not codes:
         return {"check": check, "repair": {"skipped": True, "reason": "no repair needed"}}
 
@@ -221,5 +249,13 @@ def run_check_and_repair(
     else:
         plan = RepairPlan.from_dict(check.get("repair_plan") or {})
     repair = sync_bars_repair(plan, sector=sector, job_id=job_id)
-    post_check = analyze_gaps(sector=sector, adjust_type=adjust_type, detailed=detailed)
+    from qmt_quant.core.sync.check import clear_data_check_cache
+
+    clear_data_check_cache()
+    post_check = analyze_gaps(
+        sector=sector,
+        adjust_type=adjust_type,
+        detailed=detailed,
+        include_repair_plan=False,
+    )
     return {"check": check, "repair": repair, "post_check": post_check}

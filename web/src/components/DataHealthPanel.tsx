@@ -20,13 +20,36 @@ type Props = {
     gap_summary?: { stale_count?: number };
     stale_codes?: string[];
   } | null;
+  loading?: boolean;
   onRepair?: () => void;
   repairing?: boolean;
 };
 
-export default function DataHealthPanel({ check, onRepair, repairing }: Props) {
+function HealthSkeleton() {
+  return (
+    <div className="animate-pulse space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="h-4 w-48 rounded bg-slate-800" />
+        <div className="h-6 w-20 rounded bg-slate-800" />
+      </div>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="rounded-lg border border-slate-800 px-3 py-3">
+          <div className="mb-2 h-4 w-28 rounded bg-slate-800" />
+          <div className="h-3 w-56 rounded bg-slate-900" />
+        </div>
+      ))}
+      <p className="text-xs text-slate-500">正在扫描本地数据库…</p>
+    </div>
+  );
+}
+
+export default function DataHealthPanel({ check, loading, onRepair, repairing }: Props) {
+  if (loading && !check) {
+    return <HealthSkeleton />;
+  }
+
   if (!check) {
-    return <p className="text-sm text-slate-500">加载中…</p>;
+    return <p className="text-sm text-slate-500">暂无健康数据</p>;
   }
 
   const items = check.checks || [];
@@ -79,6 +102,11 @@ export default function DataHealthPanel({ check, onRepair, repairing }: Props) {
             </div>
           </li>
         ))}
+        {loading && (
+          <li className="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-xs text-slate-500">
+            正在补充区间完整度等详细指标…
+          </li>
+        )}
       </ul>
       <TechnicalDetails data={check} />
     </div>

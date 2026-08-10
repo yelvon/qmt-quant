@@ -45,7 +45,9 @@ export function fetchTableMeta(table: string): Promise<TableMeta> {
   return apiGet(`/api/data/meta?table=${encodeURIComponent(table)}`);
 }
 
-export function fetchDataQuery(params: Record<string, string | number | boolean>): Promise<QueryResult> {
+export function fetchDataQuery(
+  params: Record<string, string | number | boolean | undefined>
+): Promise<QueryResult> {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v !== "" && v !== undefined && v !== null) qs.set(k, String(v));

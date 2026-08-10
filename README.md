@@ -224,8 +224,28 @@ data:
 | 页面打不开 / 一直加载 | 确认两个终端（或启动脚本弹出的 API、前端窗口）都在运行；执行 `.\scripts\start.ps1 -Stop` 或 `./scripts/start.sh --stop` 后重新启动 |
 | 脚本提示启动失败 | 查看 `logs/api.log`、`logs/web.log` 及弹出的 PowerShell 窗口；确认 Node.js / Python 路径正确 |
 | 接口报错 / 502 | 后端 API 未启动或 8788 被占用；检查 API 窗口日志 |
-| 数据同步失败 | QMT 客户端是否已登录；`设置` 页 doctor 是否全部通过 |
-| 只想本机访问 | 默认绑定 `127.0.0.1`，不对外网开放；无需改防火墙 |
+| 数据同步失败 | QMT 客户端是否已登录；`设置` 页 doctor 是否全部通过；若报 `database is locked`，重启服务后再试（勿同时开多个 API 进程） |
+| 查看运行日志 | 见下方「日志位置」 |
+
+### 日志位置
+
+| 日志 | 路径 / 方式 | 内容 |
+|------|-------------|------|
+| API 后端 | 项目根目录 `logs/api.log` | Python / uvicorn 输出、同步报错 |
+| 前端 Vite | 项目根目录 `logs/web.log` | `npm run dev` 输出 |
+| 实时终端 | 启动脚本弹出的两个 PowerShell 窗口 | 最直观，同步进度与异常栈都在这里 |
+| 任务记录 | 页面右上角 **任务记录** | 历史任务状态与错误信息 |
+| SQLite 数据库 | `data/qmt_quant.db`（路径见 `config/settings.yaml`） | 行情、任务、元数据 |
+
+```powershell
+# 实时跟踪 API 日志（PowerShell）
+Get-Content -Path logs\api.log -Wait -Tail 50
+```
+
+```bash
+# Git Bash
+tail -f logs/api.log
+```
 
 ## CLI 常用命令
 

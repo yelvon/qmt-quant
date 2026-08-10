@@ -170,8 +170,15 @@ def report_job_progress(
     if job_id not in _JOB_STARTED:
         _JOB_STARTED[job_id] = time.monotonic()
     eta_seconds = estimate_eta_seconds(job_id, progress)
-    with db_session() as conn:
-        update_job(conn, job_id, progress=progress, progress_message=message)
+    for attempt in range(5):
+        try:
+            with db_session() as conn:
+                update_job(conn, job_id, progress=progress, progress_message=message)
+            break
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == 4:
+                raise
+            time.sleep(0.2 * (attempt + 1))
     payload: Dict[str, Any] = {
         "status": "running",
         "progress": progress,

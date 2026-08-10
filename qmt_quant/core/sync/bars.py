@@ -134,22 +134,21 @@ def sync_bars(
     dividend = DIVIDEND_MAP.get(adjust_type, "front")
 
     written = 0
+    written = _fetch_and_upsert(
+        client,
+        codes,
+        start,
+        end,
+        adjust_type,
+        dividend,
+        settings.sync_batch_size,
+        job_id=job_id,
+        processed_base=processed_base,
+        total_codes=total_codes,
+        sector=sector,
+        mode=effective_mode,
+    )
     with db_session() as conn:
-        written = _fetch_and_upsert(
-            client,
-            conn,
-            codes,
-            start,
-            end,
-            adjust_type,
-            dividend,
-            settings.sync_batch_size,
-            job_id=job_id,
-            processed_base=processed_base,
-            total_codes=total_codes,
-            sector=sector,
-            mode=effective_mode,
-        )
         market_latest = market_latest_date(conn, adjust_type)
         if market_latest:
             set_meta(conn, f"bars_market_latest:{adjust_type}", market_latest)

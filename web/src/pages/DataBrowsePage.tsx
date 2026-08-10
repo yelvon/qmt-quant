@@ -35,6 +35,7 @@ export default function DataBrowsePage() {
   const [kline, setKline] = useState<KlinePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [klineLoading, setKlineLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortCol, setSortCol] = useState("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -59,6 +60,7 @@ export default function DataBrowsePage() {
   const loadCrossSection = useCallback(async () => {
     if (!date) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await fetchDataQuery({
         table: "daily_bar",
@@ -71,15 +73,22 @@ export default function DataBrowsePage() {
         sort_col: sortCol,
         sort_dir: sortDir,
       });
-      setQuery(res);
+      setQuery({
+        ...res,
+        columns: res.columns?.length ? res.columns : meta?.columns || [],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setQuery(null);
     } finally {
       setLoading(false);
     }
-  }, [date, adjust, codeFilter, page, sortCol, sortDir]);
+  }, [date, adjust, codeFilter, page, sortCol, sortDir, meta?.columns]);
 
   const loadSeries = useCallback(async () => {
     if (!code) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await fetchDataQuery({
         table: "daily_bar",
@@ -93,11 +102,17 @@ export default function DataBrowsePage() {
         sort_col: sortCol || "date",
         sort_dir: sortDir,
       });
-      setQuery(res);
+      setQuery({
+        ...res,
+        columns: res.columns?.length ? res.columns : meta?.columns || [],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setQuery(null);
     } finally {
       setLoading(false);
     }
-  }, [code, dateFrom, dateTo, adjust, page, sortCol, sortDir]);
+  }, [code, dateFrom, dateTo, adjust, page, sortCol, sortDir, meta?.columns]);
 
   const loadKline = useCallback(async () => {
     if (!code) return;
@@ -270,21 +285,28 @@ export default function DataBrowsePage() {
         )}
       </div>
 
-      {(tab === "cross_section" || tab === "series") && query && (
+      {(tab === "cross_section" || tab === "series") && (
         <div className="card">
-          <DataTable
-            columns={query.columns}
-            rows={query.rows}
-            total={query.total}
-            page={query.page}
-            pageSize={query.page_size}
-            loading={loading}
-            sortCol={sortCol}
-            sortDir={sortDir}
-            onSort={handleSort}
-            onPageChange={setPage}
-            onRowClick={tab === "cross_section" ? openKlineFromRow : undefined}
-          />
+          {error && <p className="mb-3 text-sm text-red-300">{error}</p>}
+          {query ? (
+            <DataTable
+              columns={query.columns}
+              rows={query.rows}
+              total={query.total}
+              page={query.page}
+              pageSize={query.page_size}
+              loading={loading}
+              sortCol={sortCol}
+              sortDir={sortDir}
+              onSort={handleSort}
+              onPageChange={setPage}
+              onRowClick={tab === "cross_section" ? openKlineFromRow : undefined}
+            />
+          ) : (
+            <p className="text-sm text-slate-500">
+              {loading ? "加载中…" : "请选择条件后查询"}
+            </p>
+          )}
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { parseApiError } from "../lib/errorMessages";
@@ -21,8 +21,24 @@ const RANGE_OPTIONS = [
   { id: "5y", label: "全量 5 年" },
 ];
 
-function checkUrl(sector: string, adjust: string) {
-  return `/api/data/check?detailed=true&sector=${encodeURIComponent(sector)}&adjust=${encodeURIComponent(adjust)}`;
+function checkUrl(sector: string, adjust: string, detailed = false, refresh = false) {
+  const params = new URLSearchParams({
+    detailed: String(detailed),
+    sector,
+    adjust,
+  });
+  if (refresh) {
+    params.set("refresh", "true");
+  }
+  return `/api/data/check?${params.toString()}`;
+}
+
+function qmtStatusUrl(sector: string, refresh = false) {
+  const params = new URLSearchParams({ sector });
+  if (refresh) {
+    params.set("refresh", "true");
+  }
+  return `/api/qmt/status?${params.toString()}`;
 }
 
 export default function DataPage() {
@@ -32,6 +48,10 @@ export default function DataPage() {
   const [financialFull, setFinancialFull] = useState(false);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [check, setCheck] = useState<any>(null);
+  const [checkLoading, setCheckLoading] = useState(true);
+  const [checkRefreshing, setCheckRefreshing] = useState(false);
+  const checkRef = useRef<any>(null);
+  checkRef.current = check;
   const [qmtOk, setQmtOk] = useState<boolean | null>(null);
   const [qmtMessage, setQmtMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -42,29 +62,50 @@ export default function DataPage() {
 
   const job = useJobTracker();
 
-  const refreshCheck = useCallback(() => {
-    return apiGet(checkUrl(sector, adjust)).then(setCheck);
+  const refreshCheck = useCallback((refresh = false) => {
+    if (checkRef.current === null) {
+      setCheckLoading(true);
+    } else {
+      setCheckRefreshing(true);
+    }
+
+    const fastPromise = apiGet(checkUrl(sector, adjust, false, refresh)).then((fast) => {
+      setCheck(fast);
+      setCheckLoading(false);
+    });
+
+    const detailedPromise = apiGet(checkUrl(sector, adjust, true, refresh)).then((full) => {
+      setCheck(full);
+    });
+
+    return Promise.all([fastPromise, detailedPromise]).finally(() => {
+      setCheckRefreshing(false);
+      setCheckLoading(false);
+    });
   }, [sector, adjust]);
 
-  const refreshQmt = useCallback(() => {
-    return apiGet<{ ok: boolean; message: string }>(
-      `/api/qmt/status?sector=${encodeURIComponent(sector)}`
-    ).then((res) => {
-      setQmtOk(res.ok);
-      setQmtMessage(res.message);
-    });
-  }, [sector]);
+  const refreshQmt = useCallback(
+    (refresh = false) => {
+      return apiGet<{ ok: boolean; message: string }>(qmtStatusUrl(sector, refresh)).then((res) => {
+        setQmtOk(res.ok);
+        setQmtMessage(res.message);
+      });
+    },
+    [sector]
+  );
 
   useEffect(() => {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
+    setCheck(null);
+    setCheckLoading(true);
     refreshCheck();
     refreshQmt();
-  }, [refreshCheck, refreshQmt]);
+  }, [sector, adjust, refreshCheck, refreshQmt]);
 
   useEffect(() => {
     if (job.status === "completed") {
-      refreshCheck();
-      refreshQmt();
+      refreshCheck(true);
+      refreshQmt(true);
     }
   }, [job.status, refreshCheck, refreshQmt]);
 
@@ -160,7 +201,7 @@ export default function DataPage() {
           <p className="mt-1 text-amber-200/80">{qmtMessage}</p>
           <p className="mt-2 text-xs text-amber-200/70">
             请确认 MiniQMT 已登录后，
-            <button type="button" className="underline" onClick={() => refreshQmt()}>
+            <button type="button" className="underline" onClick={() => refreshQmt(true)}>
               重新检测
             </button>
             ，或前往 <Link to="/settings" className="underline">设置</Link> 检查 Python 路径。
@@ -225,9 +266,15 @@ export default function DataPage() {
         )}
       </div>
       <div className="card mt-4">
-        <h2 className="mb-3 font-medium">数据健康</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="font-medium">数据健康</h2>
+          {checkRefreshing && (
+            <span className="text-xs text-slate-500">更新中…</span>
+          )}
+        </div>
         <DataHealthPanel
           check={check}
+          loading={checkLoading}
           onRepair={checkRepair}
           repairing={jobKind === "repair" && job.isRunning}
         />

@@ -111,11 +111,9 @@ def test_fetch_and_upsert_raises_on_cancel(tmp_path, monkeypatch):
         update_job(conn, job_id, status="running")
     request_job_cancel(job_id)
     client = MagicMock()
-    conn = MagicMock()
     with pytest.raises(JobCancelled) as exc:
         _fetch_and_upsert(
             client,
-            conn,
             ["600519.SH", "000001.SZ"],
             "2026-08-01",
             "2026-08-09",

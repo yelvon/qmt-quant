@@ -216,6 +216,7 @@ def analyze_gaps(
     adjust_type: str = "front",
     detailed: bool = False,
     as_of_date: Optional[str] = None,
+    include_repair_plan: bool = False,
 ) -> Dict[str, object]:
     settings = get_settings()
     as_of = as_of_date or date.today().isoformat()
@@ -230,7 +231,6 @@ def analyze_gaps(
         stale_codes, _, stale_total = scan_stale_codes(conn, sector=sector, adjust_type=adjust_type)
         missing_market = _missing_market_dates(conn, trade_dates, adjust_type)
 
-        inst_count = conn.execute("SELECT COUNT(*) FROM instrument").fetchone()[0]
         latest_map = latest_bar_dates(conn, adjust_type)
         bar_codes = len(latest_map)
 
@@ -260,14 +260,16 @@ def analyze_gaps(
                 conn, sample, range_start, range_end or as_of, adjust_type, trade_dates
             )
 
-        repair_plan = build_repair_plan(
-            sector=sector,
-            adjust_type=adjust_type,
-            codes=stale_codes if stale_codes else None,
-            missing_market_dates=missing_market,
-            market_latest=market_latest,
-            lag_days=lag_days,
-        )
+        repair_plan: Optional[Dict[str, object]] = None
+        if include_repair_plan:
+            repair_plan = build_repair_plan(
+                sector=sector,
+                adjust_type=adjust_type,
+                codes=stale_codes if stale_codes else None,
+                missing_market_dates=missing_market,
+                market_latest=market_latest,
+                lag_days=lag_days,
+            ).to_dict()
 
         needs_repair = bool(
             lag_days > 1
@@ -295,6 +297,6 @@ def analyze_gaps(
                 "missing_market_dates": missing_market[:20],
                 "completeness_median": completeness_median,
             },
-            "repair_plan": repair_plan.to_dict(),
+            "repair_plan": repair_plan,
             "needs_repair": needs_repair,
         }

@@ -94,6 +94,8 @@ def test_data_query_cross_section(client, tmp_path, monkeypatch):
     data = res.json()
     assert data["total"] == 1
     assert data["rows"][0]["code"] == "600519.SH"
+    assert data["columns"]
+    assert data["view_mode"] == "cross_section"
 
 
 def test_data_kline(client, tmp_path, monkeypatch):

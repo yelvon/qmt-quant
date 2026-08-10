@@ -7,9 +7,16 @@ from typing import Dict, List, Optional
 
 from qmt_quant.config import get_settings
 from qmt_quant.core.sync.gaps import analyze_gaps
+from qmt_quant.core.ttl_cache import TtlCache
 from qmt_quant.storage.bars import coverage_stats, quality_stats
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.sync_meta import set_meta_json
+
+_DATA_CHECK_CACHE: TtlCache[Dict[str, object]] = TtlCache(ttl_seconds=20.0)
+
+
+def clear_data_check_cache() -> None:
+    _DATA_CHECK_CACHE.clear()
 
 
 def run_data_check(
@@ -18,17 +25,46 @@ def run_data_check(
     adjust_type: str = "front",
     sector: str = "沪深A股",
     detailed: bool = False,
+    include_repair_plan: bool = False,
+    use_cache: bool = True,
+) -> Dict[str, object]:
+    as_of = as_of_date or date.today().isoformat()
+    cache_key = (sector, adjust_type, detailed, include_repair_plan, as_of)
+    if use_cache:
+        cached = _DATA_CHECK_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+    result = _run_data_check_uncached(
+        as_of_date=as_of,
+        adjust_type=adjust_type,
+        sector=sector,
+        detailed=detailed,
+        include_repair_plan=include_repair_plan,
+    )
+    if use_cache:
+        _DATA_CHECK_CACHE.set(cache_key, result)
+    return result
+
+
+def _run_data_check_uncached(
+    *,
+    as_of_date: str,
+    adjust_type: str,
+    sector: str,
+    detailed: bool,
+    include_repair_plan: bool,
 ) -> Dict[str, object]:
     run_migrations()
     settings = get_settings()
     adjust = adjust_type or settings.bar_adjust_type
-    as_of = as_of_date or date.today().isoformat()
 
     gap_info = analyze_gaps(
         sector=sector,
         adjust_type=adjust,
         detailed=detailed,
-        as_of_date=as_of,
+        as_of_date=as_of_date,
+        include_repair_plan=include_repair_plan,
     )
 
     with db_session() as conn:
@@ -137,7 +173,7 @@ def run_data_check(
             conn,
             f"last_gap_scan:{sector}",
             {
-                "as_of": as_of,
+                "as_of": as_of_date,
                 "needs_repair": gap_info.get("needs_repair"),
                 "stale_count": stale_count,
             },
@@ -147,7 +183,7 @@ def run_data_check(
         summary_ok = all(c["ok"] for c in checks[:4]) and not needs_repair
 
         return {
-            "as_of": as_of,
+            "as_of": as_of_date,
             "adjust_type": adjust,
             "checks": checks,
             "bar_coverage_pct": coverage_pct,

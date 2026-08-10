@@ -85,7 +85,7 @@ def gap_db(tmp_path, monkeypatch):
 
 
 def test_detects_stale_code(gap_db):
-    result = analyze_gaps(adjust_type="front", detailed=True)
+    result = analyze_gaps(adjust_type="front", detailed=True, include_repair_plan=True)
     assert "600000.SH" in result["stale_codes"]
     assert result["needs_repair"] is True
     plan = result["repair_plan"]

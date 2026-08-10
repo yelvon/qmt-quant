@@ -42,6 +42,7 @@ export default function DataTable({
   onRowClick,
 }: Props) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safeColumns = columns ?? [];
 
   return (
     <div>
@@ -49,7 +50,7 @@ export default function DataTable({
         <table className="w-full text-left text-sm">
           <thead className="text-slate-400">
             <tr>
-              {columns.map((c) => (
+              {safeColumns.map((c) => (
                 <th key={c.id} className="cursor-pointer p-2 whitespace-nowrap" onClick={() => onSort?.(c.id)}>
                   {c.label}
                   {sortCol === c.id ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -60,13 +61,13 @@ export default function DataTable({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={columns.length} className="p-4 text-center text-slate-500">
+                <td colSpan={Math.max(safeColumns.length, 1)} className="p-4 text-center text-slate-500">
                   加载中…
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="p-4 text-center text-slate-500">
+                <td colSpan={Math.max(safeColumns.length, 1)} className="p-4 text-center text-slate-500">
                   暂无数据
                 </td>
               </tr>
@@ -77,7 +78,7 @@ export default function DataTable({
                   className={`border-t border-slate-800 ${onRowClick ? "cursor-pointer hover:bg-slate-800/50" : ""}`}
                   onClick={() => onRowClick?.(row)}
                 >
-                  {columns.map((c) => (
+                  {safeColumns.map((c) => (
                     <td
                       key={c.id}
                       className={`p-2 whitespace-nowrap ${

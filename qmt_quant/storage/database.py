@@ -15,9 +15,12 @@ MIGRATIONS_DIR = ROOT_DIR / "migrations"
 def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     path = db_path or get_settings().db_file
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -26,7 +29,9 @@ def db_session(db_path: Optional[Path] = None) -> Generator[sqlite3.Connection, 
     conn = connect(db_path)
     try:
         yield conn
-        conn.commit()
+        from qmt_quant.storage.db_retry import run_db_retry
+
+        run_db_retry(conn.commit)
     except Exception:
         conn.rollback()
         raise
