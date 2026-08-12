@@ -1,32 +1,40 @@
-"""SQLite database helpers."""
+"""PostgreSQL database helpers."""
 
 from __future__ import annotations
 
-import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Generator, Iterable, List, Optional, Sequence, Tuple
+
+import psycopg
+from psycopg import Connection
+from psycopg.rows import tuple_row
 
 from qmt_quant.config import ROOT_DIR, get_settings
 
 MIGRATIONS_DIR = ROOT_DIR / "migrations"
 
+DbConnection = Connection[tuple]
 
-def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    path = db_path or get_settings().db_file
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+
+def get_database_url(override: Optional[str] = None) -> str:
+    if override:
+        return override
+    return get_settings().database_url
+
+
+def connect(dsn: Optional[str] = None) -> DbConnection:
+    url = get_database_url(dsn)
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL / data.db_url is not configured. "
+            "Start PostgreSQL (docker compose up -d) and set DATABASE_URL."
+        )
+    return psycopg.connect(url, row_factory=tuple_row)
 
 
 @contextmanager
-def db_session(db_path: Optional[Path] = None) -> Generator[sqlite3.Connection, None, None]:
-    conn = connect(db_path)
+def db_session(dsn: Optional[str] = None) -> Generator[DbConnection, None, None]:
+    conn = connect(dsn)
     try:
         yield conn
         from qmt_quant.storage.db_retry import run_db_retry
@@ -39,42 +47,98 @@ def db_session(db_path: Optional[Path] = None) -> Generator[sqlite3.Connection, 
         conn.close()
 
 
-def run_migrations(db_path: Optional[Path] = None) -> None:
-    with db_session(db_path) as conn:
+def _split_sql(script: str) -> List[str]:
+    parts: List[str] = []
+    buf: List[str] = []
+    for line in script.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("--"):
+            continue
+        buf.append(line)
+        if ";" in line:
+            chunk = "\n".join(buf)
+            for stmt in chunk.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    parts.append(stmt)
+            buf = []
+    tail = "\n".join(buf).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def run_migrations(dsn: Optional[str] = None) -> None:
+    with db_session(dsn) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
-                applied_at TEXT DEFAULT (datetime('now'))
+                applied_at TIMESTAMPTZ DEFAULT NOW()
             )
             """
         )
         for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
             version = sql_file.name
             row = conn.execute(
-                "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+                "SELECT 1 FROM schema_migrations WHERE version = %s",
+                (version,),
             ).fetchone()
             if row:
                 continue
             sql = sql_file.read_text(encoding="utf-8")
-            conn.executescript(sql)
+            for stmt in _split_sql(sql):
+                conn.execute(stmt)
             conn.execute(
-                "INSERT INTO schema_migrations(version) VALUES (?)", (version,)
+                "INSERT INTO schema_migrations(version) VALUES (%s)",
+                (version,),
             )
 
 
 def executemany(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     sql: str,
     rows: Iterable[Sequence[Any]],
 ) -> int:
-    cur = conn.executemany(sql, list(rows))
-    return cur.rowcount
+    data = list(rows)
+    if not data:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(sql, data)
+        return cur.rowcount
 
 
-def fetch_all(conn: sqlite3.Connection, sql: str, params: Tuple[Any, ...] = ()) -> List[sqlite3.Row]:
+def fetch_all(
+    conn: DbConnection, sql: str, params: Tuple[Any, ...] = ()
+) -> List[tuple]:
     return list(conn.execute(sql, params).fetchall())
 
 
-def fetch_one(conn: sqlite3.Connection, sql: str, params: Tuple[Any, ...] = ()) -> Optional[sqlite3.Row]:
+def fetch_one(
+    conn: DbConnection, sql: str, params: Tuple[Any, ...] = ()
+) -> Optional[tuple]:
     return conn.execute(sql, params).fetchone()
+
+
+def row_to_dict(conn: DbConnection, sql: str, params: Tuple[Any, ...] = ()) -> Optional[dict]:
+    cur = conn.execute(sql, params)
+    row = cur.fetchone()
+    if row is None:
+        return None
+    names = [desc.name for desc in cur.description]
+    return dict(zip(names, row))
+
+
+def rows_to_dicts(conn: DbConnection, sql: str, params: Tuple[Any, ...] = ()) -> List[dict]:
+    cur = conn.execute(sql, params)
+    names = [desc.name for desc in cur.description]
+    return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
+def ping_database(dsn: Optional[str] = None) -> Tuple[bool, str]:
+    try:
+        with db_session(dsn) as conn:
+            conn.execute("SELECT 1")
+        return True, "PostgreSQL connection ok"
+    except Exception as exc:
+        return False, f"PostgreSQL unavailable: {exc}"

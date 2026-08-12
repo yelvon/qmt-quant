@@ -61,17 +61,17 @@ def sync_universe(sector: str | None = None) -> int:
             name = detail.get("InstrumentName") or detail.get("name") or code.split(".")[0]
             list_date = detail.get("OpenDate") or detail.get("list_date")
             delist_date = detail.get("ExpireDate") or detail.get("delist_date")
-            is_st = 1 if _is_st(name, detail) else 0
+            is_st = _is_st(name, detail)
             conn.execute(
                 """
                 INSERT INTO instrument(code, name, list_date, delist_date, is_st, updated_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                VALUES (%s, %s, %s, %s, %s, NOW())
                 ON CONFLICT(code) DO UPDATE SET
-                    name=excluded.name,
-                    list_date=excluded.list_date,
-                    delist_date=excluded.delist_date,
-                    is_st=excluded.is_st,
-                    updated_at=datetime('now')
+                    name=EXCLUDED.name,
+                    list_date=EXCLUDED.list_date,
+                    delist_date=EXCLUDED.delist_date,
+                    is_st=EXCLUDED.is_st,
+                    updated_at=NOW()
                 """,
                 (
                     code,

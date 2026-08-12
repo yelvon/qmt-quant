@@ -89,6 +89,83 @@ function Wait-PortFree([int]$Port, [int]$TimeoutSec = 20) {
     return -not (Test-PortInUse $Port)
 }
 
+function Get-DockerComposeCommand {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return $null
+    }
+    docker compose version 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        return @{ Executable = "docker"; Prefix = @("compose") }
+    }
+    if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
+        return @{ Executable = "docker-compose"; Prefix = @() }
+    }
+    return $null
+}
+
+function Test-PostgresReady {
+    if (-not (Test-PortInUse 5432)) { return $false }
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return $true
+    }
+    $health = docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' qmt-quant-postgres 2>$null
+    if ($health -eq "healthy") { return $true }
+    if ($health -eq "none") {
+        $running = docker inspect --format='{{.State.Running}}' qmt-quant-postgres 2>$null
+        return $running -eq "true"
+    }
+    return $false
+}
+
+function Wait-PostgresReady {
+    param([int]$TimeoutSec = 60)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-PostgresReady) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+function Ensure-Postgres {
+    $composeFile = Join-Path $ProjectRoot "docker-compose.yml"
+    if (-not (Test-Path $composeFile)) {
+        Write-Warning "未找到 docker-compose.yml，跳过 PostgreSQL 启动。"
+        return
+    }
+
+    if (Test-PostgresReady) {
+        Write-Host "PostgreSQL 已在运行 (localhost:5432)，跳过启动"
+        return
+    }
+
+    $compose = Get-DockerComposeCommand
+    if (-not $compose) {
+        throw @"
+未找到 Docker，无法启动 PostgreSQL。
+请安装 Docker Desktop 并确保 docker compose 可用，或手动启动数据库后再运行本脚本。
+详见 docs/postgres-setup.md
+"@
+    }
+
+    Write-Host "启动 PostgreSQL (docker compose up -d)..."
+    Push-Location $ProjectRoot
+    try {
+        $args = @($compose.Prefix + @("up", "-d"))
+        & $compose.Executable @args
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker compose up -d 失败 (exit $LASTEXITCODE)"
+        }
+    } finally {
+        Pop-Location
+    }
+
+    if (-not (Wait-PostgresReady)) {
+        throw "PostgreSQL 启动超时，请执行 docker compose logs postgres 查看详情"
+    }
+    Write-Host "PostgreSQL 已就绪 (localhost:5432)"
+}
+
 function Wait-ForService {
     param(
         [int]$Port,
@@ -162,6 +239,8 @@ if ($Install -or -not (Test-Path (Join-Path $WebDir "node_modules"))) {
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+Ensure-Postgres
+
 Ensure-PortFree $ApiPort
 Write-Host "启动 API (http://127.0.0.1:$ApiPort)..."
 $apiScript = Join-Path $PSScriptRoot "run-api.ps1"
@@ -188,6 +267,7 @@ Write-Host ""
 Write-Host "qmt-quant 已启动："
 Write-Host "  前端  http://localhost:$WebPort"
 Write-Host "  API   http://127.0.0.1:$ApiPort"
+Write-Host "  数据库 PostgreSQL localhost:5432 (docker compose，已运行则不会重启)"
 Write-Host "停止服务: .\scripts\start.ps1 -Stop  或  ./scripts/start.sh --stop"
 
 if (-not $NoBrowser) {

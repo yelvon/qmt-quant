@@ -34,7 +34,7 @@ QMT_SYNC_TYPES = QMT_JOB_TYPES
 
 
 def _find_running_qmt_job(conn) -> Optional[Dict[str, Any]]:
-    placeholders = ",".join("?" * len(QMT_SYNC_TYPES))
+    placeholders = ",".join(["%s"] * len(QMT_SYNC_TYPES))
     row = conn.execute(
         f"""
         SELECT id, display_name, job_type FROM job
@@ -93,7 +93,7 @@ def recover_stale_jobs() -> int:
             SET status = 'failed',
                 progress = 1.0,
                 error_message = '服务重启导致任务中断，请重新同步',
-                finished_at = datetime('now')
+                finished_at = NOW()
             WHERE status = 'running'
             """
         )
@@ -347,6 +347,7 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
 
 def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[str, Any]:
     from qmt_quant.core.catalog.export import export_catalog
+    from qmt_quant.core.qmt_health import ensure_qmt_ready
     from qmt_quant.core.research.runner import run_research
     from qmt_quant.core.sync.bars import sync_bars
     from qmt_quant.core.validation.runner import run_validation
@@ -357,13 +358,20 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
         report_job_progress(job_id, progress, step_label, step=step, step_label=step_label)
 
     out: Dict[str, Any] = {}
+    sync_params: Dict[str, Any] = {
+        "incremental": True,
+        "incremental_days": params.get("days", get_settings().sync_incremental_days),
+        "adjust_type": params.get("adjust_type", get_settings().bar_adjust_type),
+        "sector": params.get("sector", get_settings().default_sector),
+        "job_id": job_id,
+    }
     try:
         _step(0.1, "sync", "更新数据")
-        out["sync"] = sync_bars(
-            incremental=True,
-            incremental_days=params.get("days", get_settings().sync_incremental_days),
-            job_id=job_id,
-        )
+        if _use_subprocess("qmt"):
+            ensure_qmt_ready(sector=str(sync_params["sector"]))
+            out["sync"] = _run_subprocess("sync_bars", "qmt", sync_params)
+        else:
+            out["sync"] = sync_bars(**sync_params)
     except Exception as exc:
         raise RuntimeError(f"[sync] {exc}") from exc
     try:

@@ -29,6 +29,7 @@ $env:PYTHONPATH = "C:\qmt\<终端>\bin.x64\Lib\site-packages"
 pip install -r requirements-qmt.txt
 pip install -e .
 copy config\settings.yaml.example config\settings.yaml
+docker compose up -d   # 仅 CLI 手动操作时；一键启动脚本会自动执行
 python -m qmt_quant.cli doctor
 python -m qmt_quant.cli init-db
 ```
@@ -60,7 +61,7 @@ jobs:
 
 ### 方式一：一键脚本（推荐）
 
-在项目根目录执行，自动启动 API + 前端并打开浏览器。
+在项目根目录执行，**自动启动 PostgreSQL（Docker，已运行则跳过）**、API + 前端并打开浏览器。需已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
 
 **PowerShell / CMD（Windows 默认终端）**
 
@@ -180,7 +181,7 @@ python -m qmt_quant.cli serve api
 
 ### 使用 CLI 时
 
-若用 **方式三** 启动，不打开浏览器，直接在终端执行命令；结果写入 `data/` 目录与 SQLite，也可随后启动 Web 查看历史 run 与图表。
+若用 **方式三** 启动，不打开浏览器，直接在终端执行命令；结果写入 PostgreSQL 与 `data/catalog` Parquet，也可随后启动 Web 查看历史 run 与图表。
 
 ### 数据同步与完整性
 
@@ -235,7 +236,7 @@ data:
 | 前端 Vite | 项目根目录 `logs/web.log` | `npm run dev` 输出 |
 | 实时终端 | 启动脚本弹出的两个 PowerShell 窗口 | 最直观，同步进度与异常栈都在这里 |
 | 任务记录 | 页面右上角 **任务记录** | 历史任务状态与错误信息 |
-| SQLite 数据库 | `data/qmt_quant.db`（路径见 `config/settings.yaml`） | 行情、任务、元数据 |
+| PostgreSQL | `data.db_url`（见 `docker compose` 与 [postgres-setup.md](./docs/postgres-setup.md)） | 行情、任务、元数据 |
 
 ```powershell
 # 实时跟踪 API 日志（PowerShell）
@@ -288,7 +289,7 @@ python -m qmt_quant.cli pipeline
 
 ```
 qmt-quant/
-├── start.bat                  # 一键启动 Web 工作台
+├── start.bat                  # 一键启动 PostgreSQL + Web 工作台
 ├── scripts/start.ps1          # 启动脚本（含 -Stop / -Install）
 ├── config/settings.yaml.example
 ├── docs/CHANGELOG.md          # 变更记录

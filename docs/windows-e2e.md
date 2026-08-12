@@ -25,7 +25,7 @@
 
 ## 跳过说明
 
-- QMT 未在线：步骤 3 可 SKIP，用已有 SQLite 继续 4–7
+- QMT 未在线：步骤 3 可 SKIP，用已有 PostgreSQL 数据继续 4–7
 - 未安装 nautilus_trader：步骤 4 NT 导出 SKIP；验证用 `validation_engine: custom`
 
 ## 自动化

@@ -8,12 +8,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- PostgreSQL 存储层：`docker-compose.yml`、`data.db_url` / `DATABASE_URL`、Greenfield PG schema
+- `docs/postgres-setup.md`；doctor「PostgreSQL 可达」检查
+- 一键启动脚本（`start.bat` / `scripts/start.sh`）会自动 `docker compose up -d` 拉起 PostgreSQL；**若容器已在运行则不会重启**
+- Pipeline 一键跑通 sync 步骤走 qmt-env subprocess（与单独同步任务一致）
 - 数据同步补强：缺口检测（`gaps.py`）、定向修复（`repair.py`）、`sync_meta` 水位表
 - 深度健康检查：市场新鲜度、个股滞后、市场缺日、区间完整度（`--detailed`）
 - CLI / Web：`sync repair`、`sync check --repair`；数据页「一键修复」；设置页 `auto_repair`
 - 财报增量同步（DS-024）：`announce_date` 水位 + `sync financial --full` 全量选项
 - QMT 交易日历真源：`get_trading_dates` + `sync calendar`（fallback 指数 K 线）
-- `migrations/002_sync_meta.sql`；`data.sync.*` 配置项
+- `data.sync.*` 配置项
 - 数据浏览 MVP：`daily_bar` / `instrument` 分页查询、日 K 线 API 与 Web 页 `/data/browse`
 - `qmt_quant/core/data/`：`table_meta`、`query`、`kline`；CLI `data query` / `data kline`
 - Web 组件：CandlestickChart、DataTable、`dataApi.ts`；导航「数据浏览」入口
@@ -38,6 +42,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Breaking**：移除 SQLite；所有读写改 PostgreSQL（`psycopg`），旧 `.db` 不迁移，需重新同步
+- 合并迁移为 PG 版 `migrations/001_init.sql`；CI pytest 依赖 postgres service
+- CORS 默认仅本地 Vite 源（`web.cors_origins`）
 - Web：③ 补股票池；④ ③vs④ 对比卡；数据健康/IC/订单/任务记录表格化；设置页环境检测
 - `settings.yaml.example`：`jobs.inline: false`；新增 `validation_engine`、`catalog_nt_dir`
 - `catalog export --fmt flat|nt|both` 支持 NT Catalog

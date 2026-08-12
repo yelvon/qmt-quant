@@ -17,7 +17,7 @@ def sync_calendar_from_bars() -> int:
         for row in rows:
             conn.execute(
                 """
-                INSERT INTO trade_calendar(cal_date, is_open) VALUES (?, 1)
+                INSERT INTO trade_calendar(cal_date, is_open) VALUES (%s, 1)
                 ON CONFLICT(cal_date) DO NOTHING
                 """,
                 (row[0],),
@@ -43,7 +43,7 @@ def sync_calendar_from_qmt(
         for d in dates:
             conn.execute(
                 """
-                INSERT INTO trade_calendar(cal_date, is_open) VALUES (?, 1)
+                INSERT INTO trade_calendar(cal_date, is_open) VALUES (%s, 1)
                 ON CONFLICT(cal_date) DO UPDATE SET is_open = 1
                 """,
                 (d,),
@@ -54,7 +54,7 @@ def sync_calendar_from_qmt(
 def list_trade_dates(limit: int = 5000) -> List[str]:
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT cal_date FROM trade_calendar WHERE is_open=1 ORDER BY cal_date DESC LIMIT ?",
+            "SELECT cal_date FROM trade_calendar WHERE is_open=1 ORDER BY cal_date DESC LIMIT %s",
             (limit,),
         ).fetchall()
     return [r[0] for r in rows]
@@ -65,7 +65,7 @@ def list_trade_dates_between(start: str, end: str) -> List[str]:
         rows = conn.execute(
             """
             SELECT cal_date FROM trade_calendar
-            WHERE is_open = 1 AND cal_date >= ? AND cal_date <= ?
+            WHERE is_open = 1 AND cal_date >= %s AND cal_date <= %s
             ORDER BY cal_date
             """,
             (start, end),

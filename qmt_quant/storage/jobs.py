@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from qmt_quant.storage.database import DbConnection, row_to_dict, rows_to_dicts
 
 
 def new_id() -> str:
@@ -14,7 +14,7 @@ def new_id() -> str:
 
 
 def create_job(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     *,
     display_name: str,
     job_type: str,
@@ -25,7 +25,7 @@ def create_job(
     conn.execute(
         """
         INSERT INTO job(id, display_name, job_type, env, status, params_json, created_at)
-        VALUES (?, ?, ?, ?, 'pending', ?, datetime('now'))
+        VALUES (%s, %s, %s, %s, 'pending', %s, NOW())
         """,
         (job_id, display_name, job_type, env, json.dumps(params or {}, ensure_ascii=False)),
     )
@@ -33,7 +33,7 @@ def create_job(
 
 
 def update_job(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     job_id: str,
     *,
     status: Optional[str] = None,
@@ -45,57 +45,51 @@ def update_job(
     fields: List[str] = []
     params: List[Any] = []
     if status is not None:
-        fields.append("status = ?")
+        fields.append("status = %s")
         params.append(status)
         if status == "running":
-            fields.append("started_at = datetime('now')")
+            fields.append("started_at = NOW()")
         if status in ("completed", "failed", "cancelled"):
-            fields.append("finished_at = datetime('now')")
+            fields.append("finished_at = NOW()")
     if progress is not None:
-        fields.append("progress = ?")
+        fields.append("progress = %s")
         params.append(progress)
     if progress_message is not None:
-        fields.append("progress_message = ?")
+        fields.append("progress_message = %s")
         params.append(progress_message)
     if result is not None:
-        fields.append("result_json = ?")
+        fields.append("result_json = %s")
         params.append(json.dumps(result, ensure_ascii=False))
     if error is not None:
-        fields.append("error_message = ?")
+        fields.append("error_message = %s")
         params.append(error)
     if not fields:
         return
     params.append(job_id)
-    conn.execute(f"UPDATE job SET {', '.join(fields)} WHERE id = ?", params)
+    conn.execute(f"UPDATE job SET {', '.join(fields)} WHERE id = %s", params)
 
 
-def get_job(conn: sqlite3.Connection, job_id: str) -> Optional[Dict[str, Any]]:
-    row = conn.execute("SELECT * FROM job WHERE id = ?", (job_id,)).fetchone()
-    if not row:
+def get_job(conn: DbConnection, job_id: str) -> Optional[Dict[str, Any]]:
+    d = row_to_dict(conn, "SELECT * FROM job WHERE id = %s", (job_id,))
+    if not d:
         return None
-    d = dict(row)
     for key in ("params_json", "result_json"):
         if d.get(key):
             d[key] = json.loads(d[key])
     return d
 
 
-def list_jobs(conn: sqlite3.Connection, limit: int = 20) -> List[Dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT * FROM job ORDER BY created_at DESC LIMIT ?", (limit,)
-    ).fetchall()
-    out = []
-    for row in rows:
-        d = dict(row)
+def list_jobs(conn: DbConnection, limit: int = 20) -> List[Dict[str, Any]]:
+    rows = rows_to_dicts(conn, "SELECT * FROM job ORDER BY created_at DESC LIMIT %s", (limit,))
+    for d in rows:
         for key in ("params_json", "result_json"):
             if d.get(key):
                 d[key] = json.loads(d[key])
-        out.append(d)
-    return out
+    return rows
 
 
 def save_backtest_run(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     *,
     engine: str,
     strategy_id: str,
@@ -108,7 +102,7 @@ def save_backtest_run(
     conn.execute(
         """
         INSERT INTO backtest_run(id, engine, strategy_id, title, params_json, metrics_json, result_path, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'completed')
         """,
         (
             run_id,
@@ -123,11 +117,10 @@ def save_backtest_run(
     return run_id
 
 
-def get_backtest_run(conn: sqlite3.Connection, run_id: str) -> Optional[Dict[str, Any]]:
-    row = conn.execute("SELECT * FROM backtest_run WHERE id = ?", (run_id,)).fetchone()
-    if not row:
+def get_backtest_run(conn: DbConnection, run_id: str) -> Optional[Dict[str, Any]]:
+    d = row_to_dict(conn, "SELECT * FROM backtest_run WHERE id = %s", (run_id,))
+    if not d:
         return None
-    d = dict(row)
     for key in ("params_json", "metrics_json"):
         if d.get(key):
             d[key] = json.loads(d[key])

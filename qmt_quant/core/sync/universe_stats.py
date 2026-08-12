@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Sequence
 
+from qmt_quant.storage.database import DbConnection
 from qmt_quant.storage.sync_meta import get_meta, set_meta
 
 
@@ -12,28 +12,27 @@ def universe_meta_key(sector: str) -> str:
     return f"universe_count:{sector}"
 
 
-def record_universe_count(conn: sqlite3.Connection, sector: str, count: int) -> None:
+def record_universe_count(conn: DbConnection, sector: str, count: int) -> None:
     if count > 0:
         set_meta(conn, universe_meta_key(sector), str(count))
 
 
-def ensure_instrument_codes(conn: sqlite3.Connection, codes: Sequence[str]) -> None:
-    """Ensure instrument rows exist for universe members (name filled later)."""
+def ensure_instrument_codes(conn: DbConnection, codes: Sequence[str]) -> None:
     if not codes:
         return
-    conn.executemany(
-        "INSERT OR IGNORE INTO instrument(code) VALUES (?)",
-        [(c,) for c in codes],
-    )
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO instrument(code) VALUES (%s) ON CONFLICT(code) DO NOTHING",
+            [(c,) for c in codes],
+        )
 
 
 def resolve_universe_total(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     sector: str,
     *,
     bar_codes: int = 0,
 ) -> tuple[int, bool]:
-    """Return (universe_total, is_estimated)."""
     cached = get_meta(conn, universe_meta_key(sector))
     if cached and str(cached).isdigit():
         n = int(cached)

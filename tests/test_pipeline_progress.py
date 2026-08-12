@@ -1,5 +1,6 @@
 """Pipeline progress tests."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from qmt_quant.core.jobs import runner
@@ -15,8 +16,14 @@ def test_pipeline_emits_progress_steps(monkeypatch):
     monkeypatch.setattr(
         runner,
         "get_settings",
-        lambda: type("S", (), {"auto_export_catalog": False, "sync_incremental_days": 5})(),
+        lambda: SimpleNamespace(
+            auto_export_catalog=False,
+            sync_incremental_days=5,
+            bar_adjust_type="front",
+            default_sector="沪深A股",
+        ),
     )
+    monkeypatch.setattr(runner, "_use_subprocess", lambda env: False)
 
     with patch("qmt_quant.core.sync.bars.sync_bars", return_value={"ok": True}), patch(
         "qmt_quant.core.research.runner.run_research", return_value={"run_id": "r1"}

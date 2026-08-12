@@ -4,21 +4,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from qmt_quant.core.jobs.context import JobCancelled
+from qmt_quant.core.jobs.context import JobCancelled, is_job_cancelled, request_job_cancel
 from qmt_quant.core.jobs import runner
-from qmt_quant.storage.database import db_session, run_migrations
+from qmt_quant.storage.database import db_session
+from qmt_quant.storage.jobs import create_job, update_job
 
 
-def test_cancel_job_sets_flag(tmp_path, monkeypatch):
-    db_file = tmp_path / "cancel.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    from qmt_quant.storage.jobs import create_job, update_job
-
-    with db_session(db_file) as conn:
+def test_cancel_job_sets_flag(db):
+    with db_session(db) as conn:
         job_id = create_job(
             conn,
             display_name="更新行情",
@@ -27,11 +20,9 @@ def test_cancel_job_sets_flag(tmp_path, monkeypatch):
             params={},
         )
         update_job(conn, job_id, status="running")
-    from qmt_quant.core.jobs.context import is_job_cancelled, request_job_cancel
 
     assert request_job_cancel(job_id)
     assert is_job_cancelled(job_id)
-    config._settings = None
 
 
 def test_resume_job_requires_checkpoint(monkeypatch):
@@ -89,18 +80,10 @@ def test_resume_job_submits_with_checkpoint(monkeypatch):
     assert submitted["params"]["resume_checkpoint"] == checkpoint
 
 
-def test_fetch_and_upsert_raises_on_cancel(tmp_path, monkeypatch):
-    db_file = tmp_path / "fetch.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
+def test_fetch_and_upsert_raises_on_cancel(db):
     from qmt_quant.core.sync.repair import _fetch_and_upsert
-    from qmt_quant.core.jobs.context import request_job_cancel
-    from qmt_quant.storage.jobs import create_job, update_job
 
-    with db_session(db_file) as conn:
+    with db_session(db) as conn:
         job_id = create_job(
             conn,
             display_name="更新行情",
@@ -125,4 +108,3 @@ def test_fetch_and_upsert_raises_on_cancel(tmp_path, monkeypatch):
             mode="incremental",
         )
     assert exc.value.checkpoint["total"] == 2
-    config._settings = None

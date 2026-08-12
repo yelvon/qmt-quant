@@ -9,6 +9,22 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: qmt
+          POSTGRES_PASSWORD: qmt
+          POSTGRES_DB: qmt_quant_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qmt -d qmt_quant_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://qmt:qmt@localhost:5432/qmt_quant_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

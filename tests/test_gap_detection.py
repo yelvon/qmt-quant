@@ -6,13 +6,13 @@ import pytest
 
 from qmt_quant.core.sync.gaps import analyze_gaps, build_repair_plan
 from qmt_quant.storage.bars import BarRow, upsert_bars
-from qmt_quant.storage.database import db_session, run_migrations
+from qmt_quant.storage.database import db_session
 
 
 def _seed_calendar(conn, dates):
     for d in dates:
         conn.execute(
-            "INSERT INTO trade_calendar(cal_date, is_open) VALUES (?, 1) ON CONFLICT DO NOTHING",
+            "INSERT INTO trade_calendar(cal_date, is_open) VALUES (%s, 1) ON CONFLICT DO NOTHING",
             (d,),
         )
 
@@ -21,7 +21,7 @@ def _seed_instruments(conn, codes):
     for code in codes:
         conn.execute(
             """
-            INSERT INTO instrument(code, name) VALUES (?, ?)
+            INSERT INTO instrument(code, name) VALUES (%s, %s)
             ON CONFLICT(code) DO NOTHING
             """,
             (code, code),
@@ -29,18 +29,11 @@ def _seed_instruments(conn, codes):
 
 
 @pytest.fixture
-def gap_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "gaps.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-
+def gap_db(db):
     today = date.today()
     trade_dates = [(today - timedelta(days=i)).isoformat() for i in range(10, 0, -1)]
 
-    with db_session(db_file) as conn:
+    with db_session(db) as conn:
         _seed_calendar(conn, trade_dates)
         codes = ["600519.SH", "000001.SZ", "600000.SH"]
         _seed_instruments(conn, codes)
@@ -80,8 +73,7 @@ def gap_db(tmp_path, monkeypatch):
                 )
             ],
         )
-    yield db_file
-    config._settings = None
+    return db
 
 
 def test_detects_stale_code(gap_db):

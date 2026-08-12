@@ -50,7 +50,7 @@ def run_screening(
     with db_session() as conn:
         for code in prices.columns:
             name_row = conn.execute(
-                "SELECT name, is_st, list_date FROM instrument WHERE code=?", (code,)
+                "SELECT name, is_st, list_date FROM instrument WHERE code=%s", (code,)
             ).fetchone()
             name = name_row[0] if name_row else code.split(".")[0]
             is_st = bool(name_row[1]) if name_row else ("ST" in name.upper())
@@ -119,7 +119,7 @@ def run_screening(
             conn.execute(
                 """
                 INSERT INTO screening_result(run_id, as_of_date, code, score, reason, rank_no)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (run_id, as_of, row["code"], row["score"], reason, i),
             )

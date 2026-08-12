@@ -1,4 +1,4 @@
-"""Export SQLite bars to NautilusTrader ParquetDataCatalog."""
+"""Export PostgreSQL bars to NautilusTrader ParquetDataCatalog."""
 
 from __future__ import annotations
 

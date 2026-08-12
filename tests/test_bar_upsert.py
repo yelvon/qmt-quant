@@ -4,18 +4,6 @@ from qmt_quant.storage.bars import BarRow, upsert_bars
 from qmt_quant.storage.database import db_session, run_migrations
 
 
-@pytest.fixture
-def db(tmp_path, monkeypatch):
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    yield db_file
-    config._settings = None
-
-
 def test_bar_upsert_idempotent(db):
     rows = [
         BarRow(
@@ -72,7 +60,7 @@ def test_bar_update_on_conflict(db):
             ],
         )
         close = conn.execute(
-            "SELECT close FROM daily_bar WHERE code=? AND date=?",
+            "SELECT close FROM daily_bar WHERE code=%s AND date=%s",
             ("000001.SZ", "2024-01-03"),
         ).fetchone()[0]
     assert close == 2.0

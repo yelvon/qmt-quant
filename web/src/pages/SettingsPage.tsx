@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { apiGet, apiPut } from "../lib/api";
+import { apiGet, apiPut, setApiToken } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import StatusBadge from "../components/StatusBadge";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<any>({});
+  const [apiToken, setApiTokenInput] = useState("");
   const [saved, setSaved] = useState(false);
   const [doctor, setDoctor] = useState<any>(null);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     apiGet("/api/settings").then(setSettings);
+    setApiTokenInput(localStorage.getItem("qmt_api_token") || "");
   }, []);
 
   async function runDoctor() {
@@ -24,6 +26,7 @@ export default function SettingsPage() {
   }
 
   async function save() {
+    setApiToken(apiToken.trim() || null);
     await apiPut("/api/settings", {
       qmt_install_dir: settings.qmt?.install_dir,
       qmt_python: settings.python?.qmt_env,
@@ -95,6 +98,17 @@ export default function SettingsPage() {
             className="input w-full"
             value={settings.qmt?.account_id || ""}
             onChange={(e) => patch(["qmt", "account_id"], e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">API Token（可选，与 settings.yaml 中 web.api_token 一致）</label>
+          <input
+            className="input w-full"
+            type="password"
+            autoComplete="off"
+            value={apiToken}
+            onChange={(e) => setApiTokenInput(e.target.value)}
+            placeholder="留空则不发送 Authorization"
           />
         </div>
         <label className="flex items-center gap-2 text-sm">

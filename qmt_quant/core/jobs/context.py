@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
 
+import psycopg
+
 from qmt_quant.storage.database import db_session
+from qmt_quant.storage.db_retry import is_transient_db_error
 from qmt_quant.storage.jobs import update_job
 
 _CANCEL_FLAGS: Dict[str, threading.Event] = {}
@@ -94,10 +96,10 @@ def _persist_cancel_request(job_id: str) -> None:
     with db_session() as conn:
         try:
             conn.execute(
-                "UPDATE job SET cancel_requested = 1 WHERE id = ? AND status = 'running'",
+                "UPDATE job SET cancel_requested = TRUE WHERE id = %s AND status = 'running'",
                 (job_id,),
             )
-        except sqlite3.OperationalError:
+        except psycopg.Error:
             pass
 
 
@@ -105,19 +107,18 @@ def _db_cancel_requested(job_id: str) -> bool:
     with db_session() as conn:
         try:
             row = conn.execute(
-                "SELECT cancel_requested FROM job WHERE id = ? AND status = 'running'",
+                "SELECT cancel_requested FROM job WHERE id = %s AND status = 'running'",
                 (job_id,),
             ).fetchone()
-        except sqlite3.OperationalError:
+        except psycopg.Error:
             return False
         return bool(row and row[0])
 
 
 def request_job_cancel(job_id: str) -> bool:
-    """Mark a running job for cooperative cancellation."""
     with db_session() as conn:
         row = conn.execute(
-            "SELECT status FROM job WHERE id = ?",
+            "SELECT status FROM job WHERE id = %s",
             (job_id,),
         ).fetchone()
         if not row or row[0] != "running":
@@ -175,8 +176,8 @@ def report_job_progress(
             with db_session() as conn:
                 update_job(conn, job_id, progress=progress, progress_message=message)
             break
-        except sqlite3.OperationalError as exc:
-            if "locked" not in str(exc).lower() or attempt == 4:
+        except psycopg.Error as exc:
+            if not is_transient_db_error(exc) or attempt == 4:
                 raise
             time.sleep(0.2 * (attempt + 1))
     payload: Dict[str, Any] = {

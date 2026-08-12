@@ -40,7 +40,7 @@ def execute_orders(orders: List[Dict[str, Any]], dry_run: bool = True) -> List[D
             conn.execute(
                 """
                 INSERT INTO live_order(order_id, code, side, price, quantity, status, dry_run)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     out.get("order_id"),
@@ -49,7 +49,7 @@ def execute_orders(orders: List[Dict[str, Any]], dry_run: bool = True) -> List[D
                     req.price,
                     req.quantity,
                     out.get("status"),
-                    1 if dry_run else 0,
+                    dry_run,
                 ),
             )
         results.append(out)
@@ -58,7 +58,7 @@ def execute_orders(orders: List[Dict[str, Any]], dry_run: bool = True) -> List[D
 
 def _is_st_code(code: str) -> bool:
     with db_session() as conn:
-        row = conn.execute("SELECT is_st FROM instrument WHERE code=?", (code,)).fetchone()
+        row = conn.execute("SELECT is_st FROM instrument WHERE code=%s", (code,)).fetchone()
     if row is not None:
         return bool(row[0])
     return "ST" in code.upper()

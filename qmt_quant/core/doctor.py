@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,12 +104,10 @@ def run_doctor() -> DoctorReport:
         xt_msg = f"xtquant failed: {exc}"
     report.checks.append(CheckResult("xtquant", xt_ok, xt_msg))
 
-    db_parent = settings.db_file.parent
-    db_parent.mkdir(parents=True, exist_ok=True)
-    writable = os.access(db_parent, os.W_OK)
-    report.checks.append(
-        CheckResult("data_dir_writable", writable, str(db_parent))
-    )
+    from qmt_quant.storage.database import ping_database
+
+    pg_ok, pg_msg = ping_database()
+    report.checks.append(CheckResult("postgresql", pg_ok, pg_msg))
 
     catalog_dir = settings.catalog_dir
     catalog_dir.mkdir(parents=True, exist_ok=True)

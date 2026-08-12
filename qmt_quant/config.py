@@ -29,7 +29,7 @@ class Settings:
     account_id: str = ""
     qmt_python: str = ""
     quant_python: str = ""
-    db_path: str = "data/qmt_quant.db"
+    database_url: str = "postgresql://qmt:qmt@localhost:5432/qmt_quant"
     parquet_catalog_dir: str = "data/catalog"
     watchlist_path: str = "config/watchlist.txt"
     default_sector: str = "沪深A股"
@@ -58,6 +58,8 @@ class Settings:
     jobs_force_subprocess_for_qmt: bool = True
     web_host: str = "127.0.0.1"
     web_port: int = 8788
+    web_api_token: str = ""
+    web_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -83,7 +85,7 @@ class Settings:
             account_id=qmt.get("account_id", ""),
             qmt_python=py.get("qmt_env", os.environ.get("QMT_PYTHON", "")),
             quant_python=py.get("quant_env", os.environ.get("QUANT_PYTHON", "")),
-            db_path=os.environ.get("QMT_QUANT_DB") or data.get("db_path", cls.db_path),
+            database_url=os.environ.get("DATABASE_URL") or data.get("db_url", cls.database_url),
             parquet_catalog_dir=data.get("parquet_catalog_dir", cls.parquet_catalog_dir),
             watchlist_path=data.get("watchlist_path", cls.watchlist_path),
             default_sector=data.get("default_sector", cls.default_sector),
@@ -118,6 +120,8 @@ class Settings:
             ),
             web_host=web.get("host", cls.web_host),
             web_port=int(web.get("port", cls.web_port)),
+            web_api_token=web.get("api_token", os.environ.get("QMT_QUANT_API_TOKEN", cls.web_api_token)),
+            web_cors_origins=web.get("cors_origins", cls.web_cors_origins),
             _raw=raw,
         )
 
@@ -126,8 +130,8 @@ class Settings:
         return p if p.is_absolute() else ROOT_DIR / p
 
     @property
-    def db_file(self) -> Path:
-        return self.resolve_path(self.db_path)
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.web_cors_origins.split(",") if o.strip()]
 
     @property
     def catalog_dir(self) -> Path:
@@ -149,7 +153,7 @@ class Settings:
             },
             "python": {"qmt_env": self.qmt_python, "quant_env": self.quant_python},
             "data": {
-                "db_path": self.db_path,
+                "db_url": self.database_url,
                 "parquet_catalog_dir": self.parquet_catalog_dir,
                 "catalog_nt_dir": self.catalog_nt_dir,
                 "export_nt_catalog": self.export_nt_catalog,
@@ -183,7 +187,12 @@ class Settings:
                 "inline": self.jobs_inline,
                 "force_subprocess_for_qmt": self.jobs_force_subprocess_for_qmt,
             },
-            "web": {"host": self.web_host, "port": self.web_port},
+            "web": {
+                "host": self.web_host,
+                "port": self.web_port,
+                "api_token": self.web_api_token,
+                "cors_origins": self.web_cors_origins,
+            },
         }
 
     def save(self, path: Path | None = None) -> None:

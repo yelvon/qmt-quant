@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
+
+from qmt_quant.storage.database import DbConnection
+
+UPSERT_BAR_SQL = """
+INSERT INTO daily_bar (
+    code, date, adjust_type, open, high, low, close, volume, amount,
+    pre_close, turnover, quality_status, source, updated_at
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'qmt', NOW())
+ON CONFLICT(code, date, adjust_type) DO UPDATE SET
+    open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
+    volume=EXCLUDED.volume, amount=EXCLUDED.amount, pre_close=EXCLUDED.pre_close,
+    turnover=EXCLUDED.turnover, quality_status=EXCLUDED.quality_status,
+    updated_at=NOW()
+"""
 
 
 @dataclass
@@ -26,20 +38,7 @@ class BarRow:
     quality_status: str = "ok"
 
 
-UPSERT_BAR_SQL = """
-INSERT INTO daily_bar (
-    code, date, adjust_type, open, high, low, close, volume, amount,
-    pre_close, turnover, quality_status, source, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'qmt', datetime('now'))
-ON CONFLICT(code, date, adjust_type) DO UPDATE SET
-    open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close,
-    volume=excluded.volume, amount=excluded.amount, pre_close=excluded.pre_close,
-    turnover=excluded.turnover, quality_status=excluded.quality_status,
-    updated_at=datetime('now')
-"""
-
-
-def upsert_bars(conn: sqlite3.Connection, rows: Iterable[BarRow]) -> int:
+def upsert_bars(conn: DbConnection, rows: Iterable[BarRow]) -> int:
     data = [
         (
             r.code, r.date, r.adjust_type, r.open, r.high, r.low, r.close,
@@ -49,40 +48,40 @@ def upsert_bars(conn: sqlite3.Connection, rows: Iterable[BarRow]) -> int:
     ]
     if not data:
         return 0
-    conn.executemany(UPSERT_BAR_SQL, data)
+    with conn.cursor() as cur:
+        cur.executemany(UPSERT_BAR_SQL, data)
     return len(data)
 
 
 def load_bars_df(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     codes: Optional[Sequence[str]] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     adjust_type: str = "front",
 ) -> pd.DataFrame:
-    clauses = ["adjust_type = ?"]
+    clauses = ["adjust_type = %s"]
     params: List = [adjust_type]
     if codes:
-        placeholders = ",".join("?" * len(codes))
+        placeholders = ",".join(["%s"] * len(codes))
         clauses.append(f"code IN ({placeholders})")
         params.extend(codes)
     if start_date:
-        clauses.append("date >= ?")
+        clauses.append("date >= %s")
         params.append(start_date)
     if end_date:
-        clauses.append("date <= ?")
+        clauses.append("date <= %s")
         params.append(end_date)
     where = " AND ".join(clauses)
     sql = f"SELECT * FROM daily_bar WHERE {where} ORDER BY date, code"
-    df = pd.read_sql_query(sql, conn, params=params)
-    return df
+    return pd.read_sql_query(sql, conn, params=params)
 
 
-def quality_stats(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[str, object]:
+def quality_stats(conn: DbConnection, adjust_type: str = "front") -> Dict[str, object]:
     rows = conn.execute(
         """
         SELECT quality_status, COUNT(*) AS cnt
-        FROM daily_bar WHERE adjust_type = ?
+        FROM daily_bar WHERE adjust_type = %s
         GROUP BY quality_status
         """,
         (adjust_type,),
@@ -99,33 +98,35 @@ def quality_stats(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[
     }
 
 
-def coverage_stats(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[str, object]:
+def coverage_stats(conn: DbConnection, adjust_type: str = "front") -> Dict[str, object]:
     row = conn.execute(
         """
         SELECT COUNT(DISTINCT code) AS codes,
                COUNT(*) AS rows,
                MIN(date) AS min_date,
                MAX(date) AS max_date
-        FROM daily_bar WHERE adjust_type = ?
+        FROM daily_bar WHERE adjust_type = %s
         """,
         (adjust_type,),
     ).fetchone()
-    return dict(row) if row else {}
+    if not row:
+        return {}
+    return {"codes": row[0], "rows": row[1], "min_date": row[2], "max_date": row[3]}
 
 
-def market_latest_date(conn: sqlite3.Connection, adjust_type: str = "front") -> Optional[str]:
+def market_latest_date(conn: DbConnection, adjust_type: str = "front") -> Optional[str]:
     row = conn.execute(
-        "SELECT MAX(date) FROM daily_bar WHERE adjust_type = ?",
+        "SELECT MAX(date) FROM daily_bar WHERE adjust_type = %s",
         (adjust_type,),
     ).fetchone()
     return row[0] if row and row[0] else None
 
 
-def latest_bar_dates(conn: sqlite3.Connection, adjust_type: str = "front") -> Dict[str, str]:
+def latest_bar_dates(conn: DbConnection, adjust_type: str = "front") -> Dict[str, str]:
     rows = conn.execute(
         """
         SELECT code, MAX(date) AS latest
-        FROM daily_bar WHERE adjust_type = ?
+        FROM daily_bar WHERE adjust_type = %s
         GROUP BY code
         """,
         (adjust_type,),
@@ -134,16 +135,16 @@ def latest_bar_dates(conn: sqlite3.Connection, adjust_type: str = "front") -> Di
 
 
 def bar_counts_by_code(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     start: str,
     end: str,
     adjust_type: str = "front",
     codes: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
-    clauses = ["adjust_type = ?", "date >= ?", "date <= ?"]
+    clauses = ["adjust_type = %s", "date >= %s", "date <= %s"]
     params: List = [adjust_type, start, end]
     if codes:
-        placeholders = ",".join("?" * len(codes))
+        placeholders = ",".join(["%s"] * len(codes))
         clauses.append(f"code IN ({placeholders})")
         params.extend(codes)
     where = " AND ".join(clauses)
@@ -159,19 +160,19 @@ def bar_counts_by_code(
 
 
 def index_bar_dates(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     code: str = "000001.SH",
     adjust_type: str = "front",
     start: Optional[str] = None,
     end: Optional[str] = None,
 ) -> List[str]:
-    clauses = ["code = ?", "adjust_type = ?"]
+    clauses = ["code = %s", "adjust_type = %s"]
     params: List = [code, adjust_type]
     if start:
-        clauses.append("date >= ?")
+        clauses.append("date >= %s")
         params.append(start)
     if end:
-        clauses.append("date <= ?")
+        clauses.append("date <= %s")
         params.append(end)
     where = " AND ".join(clauses)
     rows = conn.execute(

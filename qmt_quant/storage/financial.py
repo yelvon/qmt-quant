@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Optional
+
+from qmt_quant.storage.database import DbConnection
 
 TABLE_MAP = {
     "Balance": "financial_balance",
@@ -15,7 +16,7 @@ TABLE_MAP = {
 
 
 def upsert_financial(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     table_key: str,
     code: str,
     report_date: str,
@@ -26,18 +27,18 @@ def upsert_financial(
     conn.execute(
         f"""
         INSERT INTO {table}(code, report_date, announce_date, data_json, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
+        VALUES (%s, %s, %s, %s, NOW())
         ON CONFLICT(code, report_date) DO UPDATE SET
-            announce_date=excluded.announce_date,
-            data_json=excluded.data_json,
-            updated_at=datetime('now')
+            announce_date=EXCLUDED.announce_date,
+            data_json=EXCLUDED.data_json,
+            updated_at=NOW()
         """,
         (code, report_date, announce_date, json.dumps(payload, ensure_ascii=False)),
     )
 
 
 def load_financial_asof(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     table_key: str,
     code: str,
     as_of_date: str,
@@ -46,7 +47,7 @@ def load_financial_asof(
     row = conn.execute(
         f"""
         SELECT data_json FROM {table}
-        WHERE code = ? AND announce_date IS NOT NULL AND announce_date <= ?
+        WHERE code = %s AND announce_date IS NOT NULL AND announce_date <= %s
         ORDER BY announce_date DESC LIMIT 1
         """,
         (code, as_of_date),

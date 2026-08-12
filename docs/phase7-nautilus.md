@@ -3,7 +3,7 @@
 ## 架构
 
 ```
-SQLite bars → nt_export.py → ParquetDataCatalog (data/catalog_nt/)
+PostgreSQL bars → nt_export.py → ParquetDataCatalog (data/catalog_nt/)
                                       ↓
                          nautilus_runner.py (BacktestEngine)
                                       ↓

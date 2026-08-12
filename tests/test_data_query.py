@@ -4,23 +4,18 @@ import pytest
 
 from qmt_quant.core.data.query import get_date_range, query_table
 from qmt_quant.storage.bars import BarRow, upsert_bars
-from qmt_quant.storage.database import db_session, run_migrations
+from qmt_quant.storage.database import db_session
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
-    db_file = tmp_path / "query.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    with db_session(db_file) as conn:
+def seeded_db(db):
+    with db_session(db) as conn:
         conn.execute(
             """
             INSERT INTO instrument(code, name, list_date, is_st)
-            VALUES ('600519.SH', '贵州茅台', '2001-08-27', 0),
-                   ('000001.SZ', '平安银行', '1991-04-03', 0)
+            VALUES ('600519.SH', '贵州茅台', '2001-08-27', FALSE),
+                   ('000001.SZ', '平安银行', '1991-04-03', FALSE)
+            ON CONFLICT(code) DO NOTHING
             """
         )
         upsert_bars(
@@ -64,18 +59,17 @@ def db(tmp_path, monkeypatch):
                 ),
             ],
         )
-    yield db_file
-    config._settings = None
+    return db
 
 
-def test_cross_section_requires_date(db):
-    with db_session(db) as conn:
+def test_cross_section_requires_date(seeded_db):
+    with db_session(seeded_db) as conn:
         with pytest.raises(ValueError, match="missing_date"):
             query_table(conn, "daily_bar", "cross_section", adjust_type="front")
 
 
-def test_cross_section_pagination(db):
-    with db_session(db) as conn:
+def test_cross_section_pagination(seeded_db):
+    with db_session(seeded_db) as conn:
         result = query_table(
             conn,
             "daily_bar",
@@ -96,14 +90,14 @@ def test_cross_section_pagination(db):
     assert moutai["change_pct"] == pytest.approx(4.0)
 
 
-def test_series_requires_code(db):
-    with db_session(db) as conn:
+def test_series_requires_code(seeded_db):
+    with db_session(seeded_db) as conn:
         with pytest.raises(ValueError, match="missing_code"):
             query_table(conn, "daily_bar", "series", adjust_type="front")
 
 
-def test_series_date_range(db):
-    with db_session(db) as conn:
+def test_series_date_range(seeded_db):
+    with db_session(seeded_db) as conn:
         result = query_table(
             conn,
             "daily_bar",
@@ -120,8 +114,8 @@ def test_series_date_range(db):
     assert result["rows"][1]["date"] == "2024-01-03"
 
 
-def test_instrument_list_search(db):
-    with db_session(db) as conn:
+def test_instrument_list_search(seeded_db):
+    with db_session(seeded_db) as conn:
         result = query_table(
             conn,
             "instrument",
@@ -133,8 +127,8 @@ def test_instrument_list_search(db):
     assert result["rows"][0]["code"] == "600519.SH"
 
 
-def test_invalid_sort_col(db):
-    with db_session(db) as conn:
+def test_invalid_sort_col(seeded_db):
+    with db_session(seeded_db) as conn:
         with pytest.raises(ValueError, match="invalid_sort_col"):
             query_table(
                 conn,
@@ -145,8 +139,8 @@ def test_invalid_sort_col(db):
             )
 
 
-def test_date_range(db):
-    with db_session(db) as conn:
+def test_date_range(seeded_db):
+    with db_session(seeded_db) as conn:
         dr = get_date_range(conn, "front")
     assert dr["min_date"] == "2024-01-02"
     assert dr["max_date"] == "2024-01-03"

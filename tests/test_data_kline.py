@@ -4,18 +4,12 @@ import pytest
 
 from qmt_quant.core.data.kline import build_kline_payload
 from qmt_quant.storage.bars import BarRow, upsert_bars
-from qmt_quant.storage.database import db_session, run_migrations
+from qmt_quant.storage.database import db_session
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
-    db_file = tmp_path / "kline.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    with db_session(db_file) as conn:
+def seeded_db(db):
+    with db_session(db) as conn:
         upsert_bars(
             conn,
             [
@@ -43,12 +37,11 @@ def db(tmp_path, monkeypatch):
                 ),
             ],
         )
-    yield db_file
-    config._settings = None
+    return db
 
 
-def test_kline_payload_format(db):
-    with db_session(db) as conn:
+def test_kline_payload_format(seeded_db):
+    with db_session(seeded_db) as conn:
         payload = build_kline_payload(
             conn,
             "600519.SH",
@@ -64,15 +57,15 @@ def test_kline_payload_format(db):
     assert payload["volume"] == [1000, 900]
 
 
-def test_kline_empty_hint(db):
-    with db_session(db) as conn:
+def test_kline_empty_hint(seeded_db):
+    with db_session(seeded_db) as conn:
         payload = build_kline_payload(conn, "999999.SH", adjust="front")
     assert payload["empty"] is True
     assert "hint" in payload
     assert payload["ohlc"] == []
 
 
-def test_kline_missing_code(db):
-    with db_session(db) as conn:
+def test_kline_missing_code(seeded_db):
+    with db_session(seeded_db) as conn:
         with pytest.raises(ValueError, match="missing_code"):
             build_kline_payload(conn, "", adjust="front")

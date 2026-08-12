@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -38,6 +38,7 @@ from qmt_quant.core.sync.check import run_data_check
 from qmt_quant.core.trade.service import get_trade_status, preview_signal_orders, submit_orders
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, list_jobs
+from qmt_quant.web.auth import require_api_token
 from qmt_quant.web.status_helpers import build_status_actions
 
 
@@ -181,13 +182,25 @@ def create_app() -> FastAPI:
     run_migrations()
     recover_stale_jobs()
     app = FastAPI(title="qmt-quant", version="0.1.0")
+    settings = get_settings()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def api_token_guard(request, call_next):
+        if request.method in ("POST", "PUT") and request.url.path.startswith("/api/"):
+            try:
+                require_api_token(request)
+            except HTTPException as exc:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return await call_next(request)
 
     @app.on_event("startup")
     async def _capture_event_loop() -> None:
@@ -752,7 +765,7 @@ def create_app() -> FastAPI:
     @app.post("/api/trade/submit")
     def api_trade_submit(body: TradeBody) -> List[Dict[str, Any]]:
         if body.live and body.confirm != "LIVE":
-            return [{"error": "live orders require confirm=LIVE"}]
+            raise HTTPException(status_code=403, detail="live orders require confirm=LIVE")
         orders = preview_signal_orders(body.codes, body.side, body.quantity)
         return submit_orders(orders, live=body.live)
 

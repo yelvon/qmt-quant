@@ -1,4 +1,4 @@
-"""Export SQLite bars to Parquet for quant engines."""
+"""Export PostgreSQL bars to Parquet for quant engines."""
 
 from __future__ import annotations
 

@@ -1,27 +1,26 @@
-"""DB retry helper tests."""
+"""PostgreSQL transient error retry tests."""
 
-import sqlite3
-from unittest.mock import MagicMock
-
+import psycopg
 import pytest
 
-from qmt_quant.storage.db_retry import is_db_locked_error, run_db_retry
+from qmt_quant.storage.db_retry import is_transient_db_error, run_db_retry
 
 
-def test_is_db_locked_error():
-    assert is_db_locked_error(sqlite3.OperationalError("database is locked"))
-    assert not is_db_locked_error(sqlite3.OperationalError("no such table"))
+def test_transient_deadlock_detected():
+    assert is_transient_db_error(psycopg.errors.DeadlockDetected("deadlock"))
 
 
-def test_run_db_retry_recovers(monkeypatch):
+def test_non_transient_error():
+    assert not is_transient_db_error(ValueError("nope"))
+
+
+def test_run_db_retry_eventually_succeeds():
     calls = {"n": 0}
 
-    def action() -> str:
+    def action():
         calls["n"] += 1
-        if calls["n"] < 3:
-            raise sqlite3.OperationalError("database is locked")
+        if calls["n"] < 2:
+            raise psycopg.errors.DeadlockDetected("deadlock")
         return "ok"
 
-    monkeypatch.setattr("qmt_quant.storage.db_retry.time.sleep", lambda *_: None)
-    assert run_db_retry(action, attempts=5) == "ok"
-    assert calls["n"] == 3
+    assert run_db_retry(action, attempts=3) == "ok"

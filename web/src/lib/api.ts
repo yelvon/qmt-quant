@@ -1,9 +1,22 @@
 import React from "react";
 
 const API = "";
+const API_TOKEN_KEY = "qmt_api_token";
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  const token = localStorage.getItem(API_TOKEN_KEY);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+export function setApiToken(token: string | null): void {
+  if (token) localStorage.setItem(API_TOKEN_KEY, token);
+  else localStorage.removeItem(API_TOKEN_KEY);
+}
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`);
+  const res = await fetch(`${API}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -11,7 +24,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: body ? JSON.stringify(body) : "{}",
   });
   if (!res.ok) {
@@ -30,7 +43,7 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: body ? JSON.stringify(body) : "{}",
   });
   if (!res.ok) throw new Error(await res.text());

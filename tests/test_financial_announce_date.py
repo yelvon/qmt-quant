@@ -1,21 +1,7 @@
-import json
-
 import pytest
 
-from qmt_quant.storage.database import db_session, run_migrations
+from qmt_quant.storage.database import db_session
 from qmt_quant.storage.financial import load_financial_asof, upsert_financial
-
-
-@pytest.fixture
-def db(tmp_path, monkeypatch):
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    yield db_file
-    config._settings = None
 
 
 def test_financial_uses_announce_date_not_future(db):

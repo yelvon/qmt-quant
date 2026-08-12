@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from typing import Dict, Optional
+from typing import Dict
 
 import pandas as pd
 
+from qmt_quant.storage.database import DbConnection
 
-def load_pe_matrix(conn: sqlite3.Connection, dates: pd.DatetimeIndex, codes: list[str]) -> pd.DataFrame:
+
+def load_pe_matrix(conn: DbConnection, dates: pd.DatetimeIndex, codes: list[str]) -> pd.DataFrame:
     matrix = pd.DataFrame(index=dates, columns=codes, dtype=float)
     for code in codes:
         rows = conn.execute(
             """
             SELECT announce_date, data_json FROM financial_pershareindex
-            WHERE code = ? AND announce_date IS NOT NULL
+            WHERE code = %s AND announce_date IS NOT NULL
             ORDER BY announce_date
             """,
             (code,),

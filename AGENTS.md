@@ -13,7 +13,7 @@
 - **双 Python 环境**（硬约束）：
   - **qmt-env**（3.8–3.11 + xtquant）：数据同步、xttrader 实盘
   - **quant-env**（3.12+）：VectorBT、Polars、FastAPI、回测/选股/Web
-  - 数据交换：**SQLite** + **Parquet**（`data/`），两环境互不污染依赖。
+  - 数据交换：**PostgreSQL** + **Parquet**（`data/`），两环境互不污染依赖。
 - **验证层**：默认自研 `AShareDailyBacktester`（`custom_validator`）；**Phase 7 MVP 已启动** — 可选 `nautilus_trader` 引擎 + NT Parquet Catalog（见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)）。
 - **实盘默认 dry_run**；真实下单须 CLI `--confirm LIVE` 或 Web 二次确认。
 
@@ -56,7 +56,7 @@ qmt-quant/
     progress.md             ← 需求进度
     CHANGELOG.md            ← 变更记录
     UI设计稿.md
-  migrations/               ← SQLite 迁移
+  migrations/               ← PostgreSQL 迁移（001_init.sql）
   qmt_quant/
     adapters/qmt/           ← xtdata / xttrader（qmt-env）
     core/
@@ -67,7 +67,7 @@ qmt-quant/
       screener/             ← 选股 DSL / IC / bridge
       trade/                ← 实盘 dry_run / 风控
       jobs/                 ← 任务调度（含跨环境 subprocess）
-    storage/                ← SQLite 仓储
+    storage/                ← PostgreSQL 仓储（psycopg）
     cli/                    ← Typer CLI + _job_worker.py
     web/                    ← FastAPI
   strategies/
@@ -89,6 +89,7 @@ qmt-quant/
 pip install -r requirements-qmt.txt
 pip install -e .
 copy config\settings.yaml.example config\settings.yaml
+docker compose up -d
 python -m qmt_quant.cli doctor
 python -m qmt_quant.cli init-db
 python -m qmt_quant.cli sync bars --incremental
@@ -109,11 +110,12 @@ python -m qmt_quant.cli serve api
 |----|------|
 | `python.qmt_env` / `python.quant_env` | 两环境 Python 可执行文件路径 |
 | `jobs.inline` | `false` 时 qmt 类 job 通过 subprocess 切到 qmt-env |
-| `data.db_path` / `data.parquet_catalog_dir` | 数据目录 |
+| `data.db_url` / `data.parquet_catalog_dir` | PostgreSQL DSN 与 Parquet 目录 |
+| `web.api_token` | 可选 Bearer Token（保护 POST/PUT API） |
 | `trade.dry_run` | 默认模拟下单 |
 | `qmt.userdata_path` / `qmt.account_id` | xttrader 实盘 |
 
-环境变量：`QMT_QUANT_DB` 可覆盖数据库路径（测试用）。
+环境变量：`DATABASE_URL` 覆盖 PostgreSQL 连接串（测试/CI 用）。
 
 ---
 
@@ -123,7 +125,7 @@ python -m qmt_quant.cli serve api
 |----|------|--------|
 | `adapters/qmt/` | xtquant 封装 | 业务编排、Web 逻辑 |
 | `core/sync/` | 拉数、质量检查 | 回测计算 |
-| `core/research/` | VectorBT 扫描、报告 | 直接写 SQLite  schema |
+| `core/research/` | VectorBT 扫描、报告 | 直接写 DB schema |
 | `core/validation/` | 高保真日频验证 | 绕过 ValidationEngine 工厂 |
 | `core/screener/` | 选股、DSL、IC、bridge | 伪造财务数据（禁止 hash PE/ROE） |
 | `core/trade/` | 下单、风控 | 默认 live 下单 |
@@ -200,6 +202,7 @@ pytest
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-31 | **PostgreSQL 迁移（Breaking）**：移除 SQLite；`docker compose` + `DATABASE_URL`；API Token / CORS / Pipeline subprocess P0 |
 | 2026-07-31 | 完善计划落地：数据质量、pe_momentum、ValidationEngine、选股 DSL/IC/bridge、xttrader 骨架、跨环境 job、Web 设置/任务页、CI |
 | 2026-07-31 | 新增 `AGENTS.md`：规定每次改动须同步 CHANGELOG + progress |
 
@@ -212,7 +215,8 @@ pytest
 | 产品需求 | [docs/需求文档.md](./docs/需求文档.md) |
 | 实施进度 | [docs/progress.md](./docs/progress.md) |
 | 变更记录 | [docs/CHANGELOG.md](./docs/CHANGELOG.md) |
-| UI 交互 | [docs/UI设计稿.md](./docs/UI设计稿.md) |
+| Windows E2E | [docs/windows-e2e.md](./docs/windows-e2e.md) |
+| PostgreSQL 本地部署 | [docs/postgres-setup.md](./docs/postgres-setup.md) |
 | Canvas 原型 | [canvases/qmt-quant-ui-mockup.canvas.tsx](./canvases/qmt-quant-ui-mockup.canvas.tsx) |
 
 ---
@@ -234,4 +238,4 @@ pytest
 
 ---
 
-*最后更新：2026-07-31*
+*最后更新：2026-08-12*

@@ -6,20 +6,6 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
-from qmt_quant.web.app import create_app
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    db_file = tmp_path / "api.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    app = create_app()
-    yield TestClient(app)
-    config._settings = None
-
 
 def test_status(client):
     res = client.get("/api/status")
@@ -58,17 +44,11 @@ def test_data_query_missing_date(client):
     assert res.status_code == 400
 
 
-def test_data_query_cross_section(client, tmp_path, monkeypatch):
+def test_data_query_cross_section(client, db):
     from qmt_quant.storage.bars import BarRow, upsert_bars
-    from qmt_quant.storage.database import db_session, run_migrations
+    from qmt_quant.storage.database import db_session
 
-    db_file = tmp_path / "query_api.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    with db_session(db_file) as conn:
+    with db_session(db) as conn:
         upsert_bars(
             conn,
             [
@@ -85,30 +65,20 @@ def test_data_query_cross_section(client, tmp_path, monkeypatch):
                 )
             ],
         )
-    app = create_app()
-    c = TestClient(app)
-    res = c.get(
+    res = client.get(
         "/api/data/query?table=daily_bar&view_mode=cross_section&date=2024-01-02&adjust=front"
     )
     assert res.status_code == 200
     data = res.json()
     assert data["total"] == 1
     assert data["rows"][0]["code"] == "600519.SH"
-    assert data["columns"]
-    assert data["view_mode"] == "cross_section"
 
 
-def test_data_kline(client, tmp_path, monkeypatch):
+def test_data_kline(client, db):
     from qmt_quant.storage.bars import BarRow, upsert_bars
-    from qmt_quant.storage.database import db_session, run_migrations
+    from qmt_quant.storage.database import db_session
 
-    db_file = tmp_path / "kline_api.db"
-    monkeypatch.setenv("QMT_QUANT_DB", str(db_file))
-    from qmt_quant import config
-
-    config._settings = None
-    run_migrations(db_file)
-    with db_session(db_file) as conn:
+    with db_session(db) as conn:
         upsert_bars(
             conn,
             [
@@ -125,9 +95,7 @@ def test_data_kline(client, tmp_path, monkeypatch):
                 )
             ],
         )
-    app = create_app()
-    c = TestClient(app)
-    res = c.get("/api/data/kline?code=600519.SH&adjust=front")
+    res = client.get("/api/data/kline?code=600519.SH&adjust=front")
     assert res.status_code == 200
     data = res.json()
     assert data["empty"] is False

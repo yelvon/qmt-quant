@@ -11,7 +11,7 @@ python:
   quant_env: ""    # path to quant-env python.exe (3.12+)
 
 data:
-  db_path: "data/qmt_quant.db"
+  db_url: "postgresql://qmt:qmt@localhost:5432/qmt_quant"
   parquet_catalog_dir: "data/catalog"
   catalog_nt_dir: "data/catalog_nt"
   export_nt_catalog: false
@@ -49,3 +49,5 @@ jobs:
 web:
   host: "127.0.0.1"
   port: 8788
+  api_token: ""   # optional Bearer token for POST/PUT API
+  cors_origins: "http://localhost:5173,http://127.0.0.1:5173"

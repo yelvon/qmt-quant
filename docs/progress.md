@@ -1,13 +1,13 @@
 # qmt-quant Implementation Progress
 
-> Last updated: 2026-08-09  
+> Last updated: 2026-08-12  
 > PRD version: v0.3
 
 ## Phase Milestones
 
 | Phase | Milestone | Status |
 |-------|-----------|--------|
-| 1 | Data sync + SQLite + Parquet | Done |
+| 1 | Data sync + PostgreSQL + Parquet | Done |
 | 2 | VectorBT research + QuantStats | Done |
 | 3a | Custom A-share validator (T+1, fees) | Done |
 | 3b | NautilusTrader integration | In progress (MVP) |
@@ -35,7 +35,7 @@
 | DS-020 | Financial batch download | Done |
 | DS-021 | Core financial tables | Done |
 | DS-022 | report_date + announce_date | Done |
-| DS-023 | Structured SQLite storage | Done |
+| DS-023 | Structured PostgreSQL storage | Done |
 | DS-024 | Financial incremental update | Done |
 | DS-025 | announce_date anti-lookahead | Done |
 | DS-026 | Bar gap detection + stale scan | Done |
