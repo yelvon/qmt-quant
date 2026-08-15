@@ -332,6 +332,30 @@ class XtDataBridgeClient:
             out[code] = _json_to_df(payload)
         return out
 
+    def fetch_market_bars(
+        self,
+        codes: List[str],
+        period: str = "1d",
+        start_time: str = "",
+        end_time: str = "",
+        dividend_type: str = "front",
+    ) -> Dict[str, pd.DataFrame]:
+        """Download + read bars in one worker subprocess."""
+        result = _run_xt_worker(
+            "fetch_market_bars",
+            {
+                "codes": list(codes),
+                "period": period,
+                "start_time": start_time,
+                "end_time": end_time,
+                "dividend_type": dividend_type,
+            },
+        )
+        out: Dict[str, pd.DataFrame] = {}
+        for code, payload in (result.get("bars") or {}).items():
+            out[code] = _json_to_df(payload)
+        return out
+
     def download_financial(self, codes: List[str], table_list: List[str]) -> Dict[str, Any]:
         return _run_xt_worker(
             "download_financial",
@@ -348,6 +372,32 @@ class XtDataBridgeClient:
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
         result = _run_xt_worker(
             "get_financial",
+            {
+                "codes": list(codes),
+                "tables": list(table_list),
+                "start_time": start_time,
+                "end_time": end_time,
+                "report_type": report_type,
+            },
+        )
+        out: Dict[str, Dict[str, pd.DataFrame]] = {}
+        for code, tables in (result.get("financial") or {}).items():
+            out[code] = {}
+            for tname, payload in (tables or {}).items():
+                if payload:
+                    out[code][tname] = _json_to_df(payload)
+        return out
+
+    def fetch_financial_data(
+        self,
+        codes: List[str],
+        table_list: List[str],
+        start_time: str = "",
+        end_time: str = "",
+        report_type: str = "report_time",
+    ) -> Dict[str, Dict[str, pd.DataFrame]]:
+        result = _run_xt_worker(
+            "fetch_financial",
             {
                 "codes": list(codes),
                 "tables": list(table_list),

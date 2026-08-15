@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Sequence
+import threading
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from qmt_quant.adapters.qmt.client import XtDataClient, to_qmt_date
 from qmt_quant.adapters.qmt.transform import bars_from_dataframe
@@ -10,6 +11,7 @@ from qmt_quant.config import get_settings
 from qmt_quant.core.jobs.context import JobCancelled, is_job_cancelled, report_job_progress, sync_progress_message
 from qmt_quant.core.sync.gaps import RepairPlan, analyze_gaps, build_repair_plan
 from qmt_quant.core.sync.calendar import sync_calendar_from_bars, sync_calendar_from_qmt
+from qmt_quant.core.sync.parallel import iter_chunks, qmt_semaphore, run_batches_parallel
 from qmt_quant.storage.bars import market_latest_date, upsert_bars
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.sync_meta import set_meta
@@ -58,15 +60,17 @@ def _raise_if_cancelled(
     mode: str,
     written: int,
     prefix: str = "已中断",
+    remaining_codes: Optional[Sequence[str]] = None,
 ) -> None:
     if not job_id or not is_job_cancelled(job_id):
         return
     processed = processed_base + index
     progress = _sync_progress(0.05, processed, total)
+    remaining = list(remaining_codes if remaining_codes is not None else code_list[index:])
     raise JobCancelled(
         _build_checkpoint(
-            remaining_codes=code_list[index:],
-            processed=processed,
+            remaining_codes=remaining,
+            processed=processed_base + (total - len(remaining)),
             total=total,
             start=start,
             end=end,
@@ -75,8 +79,10 @@ def _raise_if_cancelled(
             mode=mode,
         ),
         progress=progress,
-        partial_result={"bars_written": written, "processed": processed},
-        message=sync_progress_message(processed, total, job_id=job_id, prefix=prefix),
+        partial_result={"bars_written": written, "processed": processed_base + (total - len(remaining))},
+        message=sync_progress_message(
+            processed_base + (total - len(remaining)), total, job_id=job_id, prefix=prefix
+        ),
     )
 
 
@@ -97,17 +103,24 @@ def _fetch_and_upsert(
     on_batch_done: Optional[Callable[[int, int], None]] = None,
 ) -> int:
     """Download bars from QMT and upsert in short DB transactions (no long-held locks)."""
+    settings = get_settings()
     written = 0
     code_list = list(codes)
     total = total_codes if total_codes is not None else len(code_list)
     qmt_start = to_qmt_date(start)
     qmt_end = to_qmt_date(end)
+    chunks = iter_chunks(code_list, batch_size)
+    completed_codes: Set[str] = set()
+    state_lock = threading.Lock()
 
-    for i in range(0, len(code_list), batch_size):
+    def _cancel_check() -> None:
+        with state_lock:
+            remaining = [c for c in code_list if c not in completed_codes]
+            done = len(completed_codes)
         _raise_if_cancelled(
             job_id=job_id,
             code_list=code_list,
-            index=i,
+            index=done,
             processed_base=processed_base,
             total=total,
             start=start,
@@ -116,43 +129,28 @@ def _fetch_and_upsert(
             adjust_type=adjust_type,
             mode=mode,
             written=written,
+            remaining_codes=remaining,
         )
-        chunk = code_list[i : i + batch_size]
-        done_before = processed_base + i
-        if job_id:
-            progress = _sync_progress(0.05, done_before, total)
-            report_job_progress(
-                job_id,
-                progress,
-                sync_progress_message(
-                    done_before,
-                    total,
-                    job_id=job_id,
-                    prefix="正在下载",
-                    progress=progress,
-                ),
+
+    def _process_chunk(chunk: Sequence[str]) -> int:
+        nonlocal written
+        with qmt_semaphore():
+            data = client.fetch_market_bars(
+                chunk,
+                period="1d",
+                start_time=qmt_start,
+                end_time=qmt_end,
+                dividend_type=dividend,
             )
-
-        client.download_history(
-            chunk,
-            period="1d",
-            start_time=qmt_start,
-            end_time=qmt_end,
-        )
-        data = client.get_market_bars(
-            chunk,
-            period="1d",
-            start_time=qmt_start,
-            end_time=qmt_end,
-            dividend_type=dividend,
-        )
-
+        local_written = 0
         with db_session() as conn:
             for code, df in data.items():
                 rows = bars_from_dataframe(code, df, adjust_type=adjust_type)
-                written += upsert_bars(conn, rows)
-
-        done = processed_base + min(i + batch_size, len(code_list))
+                local_written += upsert_bars(conn, rows)
+        with state_lock:
+            completed_codes.update(chunk)
+            written += local_written
+            done = processed_base + len(completed_codes)
         if on_batch_done:
             on_batch_done(done, total)
         elif job_id:
@@ -162,6 +160,28 @@ def _fetch_and_upsert(
                 progress,
                 sync_progress_message(done, total, job_id=job_id, progress=progress),
             )
+        return local_written
+
+    if job_id:
+        report_job_progress(
+            job_id,
+            _sync_progress(0.05, processed_base, total),
+            sync_progress_message(
+                processed_base,
+                total,
+                job_id=job_id,
+                prefix="正在下载",
+                progress=_sync_progress(0.05, processed_base, total),
+            ),
+        )
+
+    run_batches_parallel(
+        chunks,
+        concurrency=settings.sync_concurrency,
+        job_id=job_id,
+        cancel_check=_cancel_check,
+        worker=_process_chunk,
+    )
     return written
 
 

@@ -61,7 +61,7 @@ jobs:
 
 ### 方式一：一键脚本（推荐）
 
-在项目根目录执行，**自动启动 PostgreSQL（Docker，已运行则跳过）**、API + 前端并打开浏览器。需已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
+在项目根目录执行，**自动检查并搭建环境**（配置迁移、Python/前端依赖、**本机 PostgreSQL 优先**、init-db；已有则跳过），然后启动 API + 前端并打开浏览器。PostgreSQL 默认优先 **winget 本机安装**，Docker 为备选（Windows ARM64 无需 WSL）。
 
 **PowerShell / CMD（Windows 默认终端）**
 
@@ -70,6 +70,7 @@ jobs:
 # 或
 .\scripts\start.ps1
 .\scripts\start.ps1 -Restart    # 代码更新后：先停再起
+.\scripts\start.ps1 -SetupOnly  # 仅搭建环境，不启动服务
 .\scripts\start.ps1 -Stop
 .\scripts\start.ps1 -Install
 .\scripts\start.ps1 -NoBrowser
@@ -82,6 +83,7 @@ jobs:
 # 或
 ./scripts/start.sh
 ./scripts/start.sh --restart    # 代码更新后：先停再起
+./scripts/start.sh --setup-only # 仅搭建环境，不启动服务
 ./scripts/start.sh --stop
 ./scripts/start.sh --install
 ./scripts/start.sh --no-browser
@@ -91,7 +93,8 @@ jobs:
 
 | PowerShell 参数 | Git Bash 参数 | 说明 |
 |-----------------|---------------|------|
-| `-Install` | `--install` | 强制重新执行 `npm install` |
+| `-Install` | `--install` | 强制重新安装 Python / 前端依赖 |
+| `-SetupOnly` | `--setup-only` | 仅搭建环境，不启动服务 |
 | `-NoBrowser` | `--no-browser` | 不自动打开浏览器 |
 | `-Stop` | `--stop` | 停止 8788 / 5173 端口上的服务 |
 | `-Restart` | `--restart` | 先停止再启动（代码更新后请用此参数） |

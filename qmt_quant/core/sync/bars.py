@@ -121,10 +121,17 @@ def sync_bars(
         codes = resolve_universe(sector)
         total_codes = len(codes)
         if job_id:
+            mode_label = "增量" if effective_mode == "incremental" else "全量"
             report_job_progress(
                 job_id,
                 0.08,
-                sync_progress_message(0, total_codes, job_id=job_id, prefix="准备同步", progress=0.08),
+                sync_progress_message(
+                    0,
+                    total_codes,
+                    job_id=job_id,
+                    prefix=f"{mode_label}同步 {start} ~ {end}",
+                    progress=0.08,
+                ),
             )
         with db_session() as conn:
             record_universe_count(conn, sector, total_codes)

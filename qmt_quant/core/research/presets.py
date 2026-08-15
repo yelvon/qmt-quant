@@ -35,6 +35,8 @@ RANGE_OPTIONS = [
     {"value": "1y", "label": "近 1 年"},
     {"value": "3y", "label": "近 3 年（推荐）"},
     {"value": "5y", "label": "近 5 年"},
+    {"value": "10y", "label": "近 10 年"},
+    {"value": "20y", "label": "近 20 年"},
     {"value": "all", "label": "全部已有数据"},
 ]
 

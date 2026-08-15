@@ -35,6 +35,7 @@ class Settings:
     default_sector: str = "沪深A股"
     bar_adjust_type: str = "front"
     sync_batch_size: int = 50
+    sync_concurrency: int = 1
     sync_incremental_days: int = 5
     sync_stale_trading_days: int = 3
     sync_gap_scan_lookback: str = "3y"
@@ -91,6 +92,7 @@ class Settings:
             default_sector=data.get("default_sector", cls.default_sector),
             bar_adjust_type=data.get("bar_adjust_type", cls.bar_adjust_type),
             sync_batch_size=int(data.get("sync_batch_size", cls.sync_batch_size)),
+            sync_concurrency=int(sync.get("concurrency", cls.sync_concurrency)),
             sync_incremental_days=int(sync.get("incremental_days", cls.sync_incremental_days)),
             sync_stale_trading_days=int(sync.get("stale_trading_days", cls.sync_stale_trading_days)),
             sync_gap_scan_lookback=str(sync.get("gap_scan_lookback", cls.sync_gap_scan_lookback)),
@@ -169,6 +171,7 @@ class Settings:
                     "completeness_threshold": self.sync_completeness_threshold,
                     "auto_repair": self.sync_auto_repair,
                     "auto_repair_max_codes": self.sync_auto_repair_max_codes,
+                    "concurrency": self.sync_concurrency,
                 },
             },
             "backtest": {

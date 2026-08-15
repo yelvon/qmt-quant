@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import StatusBadge from "./StatusBadge";
 import TechnicalDetails from "./TechnicalDetails";
 
@@ -13,6 +14,8 @@ type Props = {
   check: {
     checks?: Check[];
     bar_coverage_pct?: number;
+    bar_date_min?: string | null;
+    bar_date_max?: string | null;
     as_of?: string;
     needs_repair?: boolean;
     universe_estimated?: boolean;
@@ -55,9 +58,26 @@ export default function DataHealthPanel({ check, loading, onRepair, repairing }:
   const items = check.checks || [];
   const coreOk = items.slice(0, 4).every((c) => c.ok);
   const staleCount = check.gap_summary?.stale_count ?? 0;
+  const barMin = check.bar_date_min;
+  const barMax = check.bar_date_max;
 
   return (
     <div>
+      {(barMin || barMax) && (
+        <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+          <p className="text-sm text-slate-200">本地已同步日线范围</p>
+          <p className="mt-1 font-mono text-sm text-emerald-300">
+            {barMin && barMax ? `${barMin} ~ ${barMax}` : barMax || barMin || "—"}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            <Link to="/data/browse" className="text-emerald-400 hover:underline">
+              在数据浏览中查看
+            </Link>
+            {" · "}
+            需要更长历史请使用「全量同步」。
+          </p>
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-400">
           行情覆盖 {check.universe_estimated ? "—" : `${check.bar_coverage_pct ?? "—"}%`}

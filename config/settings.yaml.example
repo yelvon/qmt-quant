@@ -27,6 +27,8 @@ data:
     completeness_threshold: 0.85
     auto_repair: false
     auto_repair_max_codes: 200
+    # 同步并发：1=安全默认（MiniQMT 单连接）；2~4 可加速全量但可能不稳定
+    concurrency: 1
 
 backtest:
   initial_cash: 1000000

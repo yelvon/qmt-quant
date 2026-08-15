@@ -271,6 +271,18 @@ def _cmd_get_trading_dates(xtdata, params):
     return {"dates": sorted(set(dates))}
 
 
+def _cmd_fetch_market_bars(xtdata, params):
+    download = _cmd_download_history(xtdata, params)
+    bars = _cmd_get_market_bars(xtdata, params)
+    return {"download": download, "bars": bars.get("bars") or {}}
+
+
+def _cmd_fetch_financial(xtdata, params):
+    download = _cmd_download_financial(xtdata, params)
+    financial = _cmd_get_financial(xtdata, params)
+    return {"download": download, "financial": financial.get("financial") or {}}
+
+
 HANDLERS = {
     "ping": _cmd_ping,
     "probe_port": _cmd_probe_port,
@@ -278,8 +290,10 @@ HANDLERS = {
     "get_instrument_detail": _cmd_get_instrument_detail,
     "download_history": _cmd_download_history,
     "get_market_bars": _cmd_get_market_bars,
+    "fetch_market_bars": _cmd_fetch_market_bars,
     "download_financial": _cmd_download_financial,
     "get_financial": _cmd_get_financial,
+    "fetch_financial": _cmd_fetch_financial,
     "get_trading_dates": _cmd_get_trading_dates,
 }
 

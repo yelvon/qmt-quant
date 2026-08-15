@@ -19,6 +19,7 @@ from qmt_quant.core.jobs.errors import ConcurrentJobError
 from qmt_quant.core.jobs.runner import (
     fetch_job,
     list_recent_jobs,
+    list_resumable_jobs,
     recover_stale_jobs,
     request_cancel_job,
     resume_job,
@@ -274,7 +275,10 @@ def create_app() -> FastAPI:
         try:
             meta = get_table_meta(table)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            msg = str(exc)
+            if msg == "unknown_stock":
+                msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
+            raise HTTPException(status_code=400, detail=msg) from exc
         with db_session() as conn:
             meta["available_adjust_types"] = list_available_adjust_types(conn)
         return {"ok": True, **meta}
@@ -318,11 +322,17 @@ def create_app() -> FastAPI:
                     sort_dir=sort_dir,
                 )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            msg = str(exc)
+            if msg == "unknown_stock":
+                msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
+            raise HTTPException(status_code=400, detail=msg) from exc
         try:
             meta = get_table_meta(table)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            msg = str(exc)
+            if msg == "unknown_stock":
+                msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
+            raise HTTPException(status_code=400, detail=msg) from exc
         return {
             "ok": True,
             "table": table,
@@ -342,7 +352,10 @@ def create_app() -> FastAPI:
             with db_session() as conn:
                 return build_kline_payload(conn, code, date_from, date_to, adjust)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            msg = str(exc)
+            if msg == "unknown_stock":
+                msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
+            raise HTTPException(status_code=400, detail=msg) from exc
 
     @app.get("/api/data/dates")
     def api_data_dates(adjust: str = "front") -> Dict[str, Any]:
@@ -350,7 +363,10 @@ def create_app() -> FastAPI:
             with db_session() as conn:
                 return {"ok": True, **get_date_range(conn, adjust)}
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            msg = str(exc)
+            if msg == "unknown_stock":
+                msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
+            raise HTTPException(status_code=400, detail=msg) from exc
 
     @app.get("/api/qmt/status")
     def api_qmt_status(sector: str = "沪深A股", refresh: bool = False) -> Dict[str, Any]:
@@ -367,9 +383,15 @@ def create_app() -> FastAPI:
             "adjust_type": body.adjust,
         }
         if body.range_preset and not body.incremental:
-            start, _ = resolve_range_preset(body.range_preset)
+            start, end = resolve_range_preset(body.range_preset)
             params["start_date"] = start
             params["incremental"] = False
+            params["range_preset"] = body.range_preset
+        elif not body.incremental:
+            start, end = resolve_range_preset("3y")
+            params["start_date"] = start
+            params["incremental"] = False
+            params["range_preset"] = "3y"
         job_id = _submit_job_safe(
             display_name="更新行情",
             job_type="sync_bars",
@@ -600,7 +622,10 @@ def create_app() -> FastAPI:
         try:
             new_id = resume_job(job_id)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            msg = str(exc)
+            if msg == "unknown_stock":
+                msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
+            raise HTTPException(status_code=400, detail=msg) from exc
         return {"job_id": new_id}
 
     @app.post("/api/jobs/{job_id}/retry")
@@ -619,6 +644,10 @@ def create_app() -> FastAPI:
     @app.get("/api/jobs")
     def api_jobs(limit: int = 20) -> List[Dict[str, Any]]:
         return list_recent_jobs(limit)
+
+    @app.get("/api/jobs/resumable")
+    def api_jobs_resumable(limit: int = 5) -> List[Dict[str, Any]]:
+        return list_resumable_jobs(limit=limit)
 
     @app.get("/api/options/sectors")
     def options_sectors() -> List[Dict[str, str]]:

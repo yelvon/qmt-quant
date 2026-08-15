@@ -6,6 +6,7 @@
 #   ./scripts/start.sh --install    # npm install before start
 #   ./scripts/start.sh --stop       # stop servers
 #   ./scripts/start.sh --restart    # stop then start
+#   ./scripts/start.sh --setup-only # setup env only, do not start servers
 #   ./scripts/start.sh --no-browser # do not open browser
 
 set -euo pipefail
@@ -33,13 +34,15 @@ INSTALL=false
 NO_BROWSER=false
 STOP=false
 RESTART=false
+SETUP_ONLY=false
 
 usage() {
   cat <<'EOF'
 用法: ./scripts/start.sh [选项]
 
 选项:
-  --install      启动前执行 npm install
+  --install      强制重新安装 Python / 前端依赖
+  --setup-only   仅搭建环境（配置、依赖、PostgreSQL、init-db），不启动服务
   --no-browser   不自动打开浏览器
   --stop         停止 8788 / 5173 端口上的服务
   --restart      先停止再启动（代码更新后推荐）
@@ -50,6 +53,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --install) INSTALL=true; shift ;;
+    --setup-only) SETUP_ONLY=true; shift ;;
     --no-browser) NO_BROWSER=true; shift ;;
     --stop) STOP=true; shift ;;
     --restart) RESTART=true; STOP=true; shift ;;
@@ -63,8 +67,16 @@ if ! command -v powershell.exe >/dev/null 2>&1; then
   exit 1
 fi
 
+# Git Bash ↔ PowerShell: use UTF-8 to avoid mojibake / duplicated CJK glyphs
+if command -v chcp.com >/dev/null 2>&1; then
+  chcp.com 65001 >/dev/null 2>&1 || true
+fi
+
 PS_ARGS=(-NoProfile -ExecutionPolicy Bypass -File "$SERVICE_PS1")
-if $STOP && ! $RESTART; then
+if $SETUP_ONLY; then
+  PS_ARGS+=(-SetupOnly)
+  $INSTALL && PS_ARGS+=(-Install)
+elif $STOP && ! $RESTART; then
   PS_ARGS+=(-Stop)
 else
   $RESTART && PS_ARGS+=(-Restart)

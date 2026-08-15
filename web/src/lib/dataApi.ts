@@ -71,3 +71,23 @@ export function fetchKline(params: {
 export function fetchDateRange(adjust = "front"): Promise<DateRange> {
   return apiGet(`/api/data/dates?adjust=${encodeURIComponent(adjust)}`);
 }
+
+export type InstrumentRow = {
+  code: string;
+  name?: string | null;
+  list_date?: string | null;
+  delist_date?: string | null;
+  is_st?: boolean | number | null;
+};
+
+export async function searchInstruments(q: string, pageSize = 20): Promise<InstrumentRow[]> {
+  const res = await fetchDataQuery({
+    table: "instrument",
+    view_mode: "instrument_list",
+    q,
+    page_size: pageSize,
+    sort_col: "code",
+    sort_dir: "asc",
+  });
+  return res.rows as InstrumentRow[];
+}

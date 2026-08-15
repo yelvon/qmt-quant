@@ -159,7 +159,7 @@ def catalog_export(
 def research_run(
     strategy: str = typer.Option("ma_cross"),
     sector: str = typer.Option("沪深A股"),
-    range_preset: str = typer.Option("3y", help="1y|3y|5y|all"),
+    range_preset: str = typer.Option("3y", help="1y|3y|5y|10y|20y|all"),
     short_preset: str = typer.Option("preset_std"),
     long_preset: str = typer.Option("preset_std"),
     fee_preset: str = typer.Option("default"),
@@ -183,7 +183,7 @@ def research_run(
 def research_walk_forward(
     strategy: str = typer.Option("ma_cross"),
     sector: str = typer.Option("沪深A股"),
-    range_preset: str = typer.Option("3y", help="1y|3y|5y|all"),
+    range_preset: str = typer.Option("3y", help="1y|3y|5y|10y|20y|all"),
     short_preset: str = typer.Option("preset_std"),
     long_preset: str = typer.Option("preset_std"),
     fee_preset: str = typer.Option("default"),

@@ -7,6 +7,7 @@ type Props = {
   status?: string;
   message?: string;
   error?: string | null;
+  heading?: string;
   completeAction?: { label: string; onClick?: () => void; to?: string };
   onCancel?: () => void;
   onResume?: () => void;
@@ -21,6 +22,7 @@ export default function JobProgressBar({
   status,
   message,
   error,
+  heading,
   completeAction,
   onCancel,
   onResume,
@@ -41,6 +43,7 @@ export default function JobProgressBar({
 
   return (
     <div className="mt-3 lg:col-span-3">
+      {heading ? <p className="mb-2 text-sm font-medium text-slate-200">{heading}</p> : null}
       <div className="mb-1 flex justify-between gap-2 text-xs text-slate-400">
         <span className="min-w-0 flex-1 truncate">{label}</span>
         <span className="shrink-0">{pct}%</span>

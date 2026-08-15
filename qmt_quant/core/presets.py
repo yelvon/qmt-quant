@@ -12,6 +12,8 @@ def resolve_range_preset(preset: str, max_date: str | None = None) -> Tuple[str,
         "1y": 365,
         "3y": 365 * 3,
         "5y": 365 * 5,
+        "10y": 365 * 10,
+        "20y": 365 * 20,
     }
     if preset == "all":
         start = date(2005, 1, 1)

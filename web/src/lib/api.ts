@@ -17,7 +17,18 @@ export function setApiToken(token: string | null): void {
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const obj = JSON.parse(text);
+      const detail = obj.detail;
+      if (typeof detail === "string") throw new Error(detail);
+      throw new Error(JSON.stringify(detail));
+    } catch (e) {
+      if (e instanceof Error && e.message !== text) throw e;
+      throw new Error(text || res.statusText);
+    }
+  }
   return res.json();
 }
 

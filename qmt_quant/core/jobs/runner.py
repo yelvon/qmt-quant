@@ -164,12 +164,17 @@ def resume_job(job_id: str) -> str:
     display = job.get("display_name", "继续任务")
     if "续传" not in display:
         display = f"{display}（续传）"
-    return submit_job(
+    new_id = submit_job(
         display_name=display,
         job_type=str(job.get("job_type", "")),
         env=str(job.get("env", "quant")),
         params=params,
     )
+    with db_session() as conn:
+        result["checkpoint"] = None
+        result["superseded_by"] = new_id
+        update_job(conn, job_id, result=result)
+    return new_id
 
 
 def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -> None:
@@ -407,3 +412,46 @@ def list_recent_jobs(limit: int = 20) -> List[Dict[str, Any]]:
 
     with db_session() as conn:
         return list_jobs(conn, limit=limit)
+
+
+_RESUMABLE_JOB_TYPES = frozenset({"sync_bars", "sync_financial"})
+
+
+def list_resumable_jobs(limit: int = 5) -> List[Dict[str, Any]]:
+    """Return recently cancelled sync jobs that still have a checkpoint."""
+    out: List[Dict[str, Any]] = []
+    for job in list_recent_jobs(limit=50):
+        if job.get("status") != "cancelled":
+            continue
+        job_type = str(job.get("job_type") or "")
+        if job_type not in _RESUMABLE_JOB_TYPES:
+            continue
+        result = job.get("result_json") or {}
+        checkpoint = result.get("checkpoint")
+        if not checkpoint:
+            continue
+        remaining = list(checkpoint.get("remaining_codes") or [])
+        if not remaining:
+            continue
+        processed = int(checkpoint.get("processed") or 0)
+        total = int(checkpoint.get("total") or (processed + len(remaining)))
+        out.append(
+            {
+                "job_id": job["id"],
+                "job_type": job_type,
+                "display_name": job.get("display_name"),
+                "progress_message": job.get("progress_message"),
+                "progress": float(job.get("progress") or 0),
+                "processed": processed,
+                "total": total,
+                "remaining": len(remaining),
+                "sector": checkpoint.get("sector"),
+                "start": checkpoint.get("start") or checkpoint.get("start_time"),
+                "end": checkpoint.get("end") or checkpoint.get("end_time"),
+                "mode": checkpoint.get("mode"),
+                "incremental": checkpoint.get("incremental"),
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out

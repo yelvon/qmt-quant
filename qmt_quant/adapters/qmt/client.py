@@ -128,6 +128,28 @@ class XtDataClient:
             )
         return self._normalize_market_data(raw, codes)
 
+    def fetch_market_bars(
+        self,
+        codes: Sequence[str],
+        period: str = "1d",
+        start_time: str = "",
+        end_time: str = "",
+        dividend_type: str = "front",
+    ) -> Dict[str, pd.DataFrame]:
+        if self._bridge:
+            raw = self._bridge.fetch_market_bars(
+                list(codes), period, start_time, end_time, dividend_type
+            )
+            return {normalize_code(k): v for k, v in raw.items()}
+        self.download_history(codes, period=period, start_time=start_time, end_time=end_time)
+        return self.get_market_bars(
+            codes,
+            period=period,
+            start_time=start_time,
+            end_time=end_time,
+            dividend_type=dividend_type,
+        )
+
     def download_financial(self, codes: Sequence[str], table_list: Sequence[str]) -> DownloadStats:
         if self._bridge:
             raw = self._bridge.download_financial(list(codes), list(table_list))
@@ -165,6 +187,27 @@ class XtDataClient:
         return self._xt.get_financial_data(
             stock_list=list(codes),
             table_list=list(table_list),
+            start_time=start_time,
+            end_time=end_time,
+            report_type=report_type,
+        )
+
+    def fetch_financial_data(
+        self,
+        codes: Sequence[str],
+        table_list: Sequence[str],
+        start_time: str = "",
+        end_time: str = "",
+        report_type: str = "report_time",
+    ) -> Dict[str, Dict[str, pd.DataFrame]]:
+        if self._bridge:
+            return self._bridge.fetch_financial_data(
+                list(codes), list(table_list), start_time, end_time, report_type
+            )
+        self.download_financial(codes, table_list)
+        return self.get_financial_data(
+            codes,
+            table_list,
             start_time=start_time,
             end_time=end_time,
             report_type=report_type,

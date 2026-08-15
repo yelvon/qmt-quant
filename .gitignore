@@ -11,7 +11,9 @@ __pycache__/
 dist/
 build/
 .venv/
+.venv-quant/
 venv/
+.setup/
 qmt-env/
 quant-env/
 

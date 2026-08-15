@@ -4,6 +4,8 @@ import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import DataTable from "../components/DataTable";
 import CandlestickChart from "../components/CandlestickChart";
+import DateRangePicker from "../components/DateRangePicker";
+import StockSearchInput from "../components/StockSearchInput";
 import {
   fetchDataQuery,
   fetchDateRange,
@@ -13,6 +15,7 @@ import {
   type QueryResult,
   type TableMeta,
 } from "../lib/dataApi";
+import { defaultOneYearRange, rangeForPreset, todayISO, type DatePresetId } from "../lib/dateUtils";
 
 type TabId = "cross_section" | "series" | "kline";
 
@@ -23,19 +26,25 @@ const ADJUST_FALLBACK = [
 ];
 
 export default function DataBrowsePage() {
-  const [tab, setTab] = useState<TabId>("cross_section");
+  const [tab, setTab] = useState<TabId>("kline");
   const [meta, setMeta] = useState<TableMeta | null>(null);
   const [adjust, setAdjust] = useState("front");
   const [date, setDate] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState("600519.SH");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [dateMin, setDateMin] = useState<string | null>(null);
+  const [dateMax, setDateMax] = useState<string | null>(null);
+  const [activePreset, setActivePreset] = useState<DatePresetId | null>("1y");
+  const [datesLoading, setDatesLoading] = useState(true);
+  const [filtersReady, setFiltersReady] = useState(false);
   const [codeFilter, setCodeFilter] = useState("");
   const [query, setQuery] = useState<QueryResult | null>(null);
   const [kline, setKline] = useState<KlinePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [klineLoading, setKlineLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [klineError, setKlineError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortCol, setSortCol] = useState("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -50,11 +59,31 @@ export default function DataBrowsePage() {
   }, []);
 
   useEffect(() => {
-    fetchDateRange(adjust).then((r) => {
-      if (r.max_date) setDate((d) => d || r.max_date!);
-      if (r.min_date) setDateFrom((d) => d || r.min_date!);
-      if (r.max_date) setDateTo((d) => d || r.max_date!);
-    });
+    setDatesLoading(true);
+    setFiltersReady(false);
+    fetchDateRange(adjust)
+      .then((r) => {
+        const max = r.max_date || todayISO();
+        setDateMin(r.min_date);
+        setDateMax(r.max_date);
+        setDate((d) => d || max);
+        const { from, to } = r.max_date
+          ? defaultOneYearRange(max, r.min_date)
+          : rangeForPreset("1y", max, r.min_date);
+        setDateFrom(from);
+        setDateTo(to);
+        setActivePreset("1y");
+        setFiltersReady(true);
+      })
+      .catch(() => {
+        const max = todayISO();
+        const { from, to } = rangeForPreset("1y", max);
+        setDateFrom(from);
+        setDateTo(to);
+        setDate(max);
+        setFiltersReady(true);
+      })
+      .finally(() => setDatesLoading(false));
   }, [adjust]);
 
   const loadCrossSection = useCallback(async () => {
@@ -85,65 +114,117 @@ export default function DataBrowsePage() {
     }
   }, [date, adjust, codeFilter, page, sortCol, sortDir, meta?.columns]);
 
-  const loadSeries = useCallback(async () => {
-    if (!code) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchDataQuery({
-        table: "daily_bar",
-        view_mode: "series",
-        code,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-        adjust,
-        page,
-        page_size: 100,
-        sort_col: sortCol || "date",
-        sort_dir: sortDir,
-      });
-      setQuery({
-        ...res,
-        columns: res.columns?.length ? res.columns : meta?.columns || [],
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setQuery(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [code, dateFrom, dateTo, adjust, page, sortCol, sortDir, meta?.columns]);
+  const loadSeries = useCallback(
+    async (overrides?: { code?: string; from?: string; to?: string }) => {
+      const queryCode = (overrides?.code ?? code).trim();
+      const from = overrides?.from ?? dateFrom;
+      const to = overrides?.to ?? dateTo;
+      if (!queryCode || !from || !to) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchDataQuery({
+          table: "daily_bar",
+          view_mode: "series",
+          code: queryCode,
+          date_from: from,
+          date_to: to,
+          adjust,
+          page,
+          page_size: 100,
+          sort_col: sortCol || "date",
+          sort_dir: sortDir,
+        });
+        setQuery({
+          ...res,
+          columns: res.columns?.length ? res.columns : meta?.columns || [],
+        });
+        if (res.rows[0]?.code && String(res.rows[0].code) !== code) {
+          setCode(String(res.rows[0].code));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        setQuery(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [code, dateFrom, dateTo, adjust, page, sortCol, sortDir, meta?.columns]
+  );
 
-  const loadKline = useCallback(async () => {
-    if (!code) return;
-    setKlineLoading(true);
-    try {
-      const res = await fetchKline({
-        code,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-        adjust,
-      });
-      setKline(res);
-    } finally {
-      setKlineLoading(false);
-    }
-  }, [code, dateFrom, dateTo, adjust]);
+  const queryKline = useCallback(
+    async (overrides?: { code?: string; from?: string; to?: string }) => {
+      const queryCode = (overrides?.code ?? code).trim();
+      const from = overrides?.from ?? dateFrom;
+      const to = overrides?.to ?? dateTo;
+      if (!queryCode) {
+        setKlineError("请选择或输入股票代码/名称");
+        return;
+      }
+      if (!from || !to) {
+        setKlineError("请选择日期范围");
+        return;
+      }
+      setKlineLoading(true);
+      setKlineError(null);
+      try {
+        const res = await fetchKline({
+          code: queryCode,
+          date_from: from,
+          date_to: to,
+          adjust,
+        });
+        setKline(res);
+        if (res.code && res.code !== code) setCode(res.code);
+        if (res.empty) setKlineError(res.hint || "暂无 K 线数据");
+      } catch (err) {
+        setKlineError(err instanceof Error ? err.message : String(err));
+        setKline(null);
+      } finally {
+        setKlineLoading(false);
+      }
+    },
+    [code, dateFrom, dateTo, adjust]
+  );
 
   useEffect(() => {
     if (tab === "cross_section") loadCrossSection();
   }, [tab, loadCrossSection]);
 
   useEffect(() => {
+    if (!filtersReady || tab === "cross_section") return;
     if (tab === "series") {
-      loadSeries();
-      loadKline();
+      void loadSeries();
+      void queryKline();
+    } else if (tab === "kline") {
+      void queryKline();
     }
-  }, [tab, loadSeries, loadKline]);
+  }, [tab, filtersReady]);
 
-  useEffect(() => {
-    if (tab === "kline") loadKline();
-  }, [tab, loadKline]);
+  function handleDateRangeChange(from: string, to: string, preset?: DatePresetId | null) {
+    setDateFrom(from);
+    setDateTo(to);
+    setActivePreset(preset ?? null);
+    if (tab === "series") {
+      void loadSeries({ from, to });
+      void queryKline({ from, to });
+    } else if (tab === "kline") {
+      void queryKline({ from, to });
+    }
+  }
+
+  function runCurrentQuery() {
+    if (tab === "cross_section") {
+      void loadCrossSection();
+      return;
+    }
+    if (tab === "series") {
+      void loadSeries();
+      void queryKline();
+      return;
+    }
+    void queryKline();
+  }
 
   function handleSort(col: string) {
     if (sortCol === col) {
@@ -160,6 +241,7 @@ export default function DataBrowsePage() {
     if (!c) return;
     setCode(c);
     setTab("kline");
+    void queryKline({ code: c });
   }
 
   const adjustOptions =
@@ -172,6 +254,8 @@ export default function DataBrowsePage() {
     { id: "series", label: "时间序列" },
     { id: "kline", label: "K 线" },
   ];
+
+  const canQuerySeries = Boolean(code.trim() && dateFrom && dateTo && !datesLoading);
 
   return (
     <div>
@@ -199,17 +283,18 @@ export default function DataBrowsePage() {
         ))}
       </div>
 
-      <div className="card mb-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
-
+      <div className="card mb-4 space-y-4">
         {tab === "cross_section" && (
-          <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
             <label className="block text-sm">
-              <span className="text-slate-400">交易日</span>
+              <span className="label">交易日</span>
               <input
                 type="date"
-                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5"
+                className="input"
                 value={date}
+                min={dateMin || undefined}
+                max={dateMax || todayISO()}
                 onChange={(e) => {
                   setDate(e.target.value);
                   setPage(1);
@@ -217,10 +302,10 @@ export default function DataBrowsePage() {
               />
             </label>
             <label className="block text-sm">
-              <span className="text-slate-400">代码前缀（可选）</span>
+              <span className="label">代码或名称（可选）</span>
               <input
-                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5"
-                placeholder="600519"
+                className="input"
+                placeholder="600519 或 贵州茅台"
                 value={codeFilter}
                 onChange={(e) => {
                   setCodeFilter(e.target.value);
@@ -229,56 +314,53 @@ export default function DataBrowsePage() {
               />
             </label>
             <div className="flex items-end">
-              <button type="button" className="btn-primary" onClick={loadCrossSection}>
+              <button type="button" className="btn-primary w-full sm:w-auto" onClick={loadCrossSection}>
                 查询
               </button>
             </div>
-          </>
+          </div>
         )}
 
         {(tab === "series" || tab === "kline") && (
           <>
-            <label className="block text-sm">
-              <span className="text-slate-400">代码</span>
-              <input
-                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5"
-                placeholder="600519.SH"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-400">起始日</span>
-              <input
-                type="date"
-                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-400">截止日</span>
-              <input
-                type="date"
-                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </label>
-            <div className="flex items-end gap-2">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
+              <div className="lg:col-span-2">
+                <StockSearchInput
+                  value={code}
+                  onChange={setCode}
+                  onResolved={(resolved) => {
+                    if (tab === "kline") void queryKline({ code: resolved });
+                    if (tab === "series") {
+                      void loadSeries({ code: resolved });
+                      void queryKline({ code: resolved });
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <DateRangePicker
+              from={dateFrom}
+              to={dateTo}
+              min={dateMin}
+              max={dateMax}
+              activePreset={activePreset}
+              loading={datesLoading}
+              onChange={handleDateRangeChange}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
+              <p className="text-xs text-slate-500">
+                {canQuerySeries
+                  ? "支持代码/名称搜索；点快捷日期后会自动查询"
+                  : "正在准备默认日期…"}
+              </p>
               <button
                 type="button"
-                className="btn-primary"
-                onClick={() => {
-                  if (tab === "series") {
-                    loadSeries();
-                    loadKline();
-                  } else {
-                    loadKline();
-                  }
-                }}
+                className="btn-primary min-w-24"
+                onClick={runCurrentQuery}
+                disabled={!canQuerySeries}
               >
-                查询
+                {klineLoading || loading ? "查询中…" : "查询"}
               </button>
             </div>
           </>
@@ -303,15 +385,26 @@ export default function DataBrowsePage() {
               onRowClick={tab === "cross_section" ? openKlineFromRow : undefined}
             />
           ) : (
-            <p className="text-sm text-slate-500">
-              {loading ? "加载中…" : "请选择条件后查询"}
-            </p>
+            <p className="text-sm text-slate-500">{loading ? "加载中…" : "请选择条件后查询"}</p>
           )}
         </div>
       )}
 
       {(tab === "series" || tab === "kline") && (
         <div className="card mt-4">
+          {klineError && !klineLoading && (
+            <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              {klineError}
+              {klineError.includes("同步") && (
+                <>
+                  {" "}
+                  <Link to="/data" className="text-emerald-300 underline">
+                    去同步数据
+                  </Link>
+                </>
+              )}
+            </div>
+          )}
           <CandlestickChart data={kline} loading={klineLoading} />
         </div>
       )}

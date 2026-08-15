@@ -127,6 +127,23 @@ def test_instrument_list_search(seeded_db):
     assert result["rows"][0]["code"] == "600519.SH"
 
 
+def test_resolve_stock_code_by_name(seeded_db):
+    from qmt_quant.core.data.query import resolve_stock_code
+
+    with db_session(seeded_db) as conn:
+        assert resolve_stock_code(conn, "贵州茅台") == "600519.SH"
+        assert resolve_stock_code(conn, "600519") == "600519.SH"
+
+
+def test_kline_by_stock_name(seeded_db):
+    from qmt_quant.core.data.kline import build_kline_payload
+
+    with db_session(seeded_db) as conn:
+        payload = build_kline_payload(conn, "贵州茅台", adjust="front")
+    assert payload["empty"] is False
+    assert payload["code"] == "600519.SH"
+
+
 def test_invalid_sort_col(seeded_db):
     with db_session(seeded_db) as conn:
         with pytest.raises(ValueError, match="invalid_sort_col"):

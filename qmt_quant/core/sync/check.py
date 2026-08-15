@@ -6,11 +6,12 @@ from datetime import date
 from typing import Dict, List, Optional
 
 from qmt_quant.config import get_settings
+from qmt_quant.core.data.query import get_date_range
 from qmt_quant.core.sync.gaps import analyze_gaps
 from qmt_quant.core.ttl_cache import TtlCache
 from qmt_quant.storage.bars import coverage_stats, quality_stats
 from qmt_quant.storage.database import db_session, run_migrations
-from qmt_quant.storage.sync_meta import set_meta_json
+from qmt_quant.storage.sync_meta import get_meta, set_meta_json
 
 _DATA_CHECK_CACHE: TtlCache[Dict[str, object]] = TtlCache(ttl_seconds=20.0)
 
@@ -147,19 +148,32 @@ def _run_data_check_uncached(
             }
         )
 
-        fin_count = conn.execute(
-            "SELECT COUNT(*) FROM financial_pershareindex"
-        ).fetchone()[0]
+        fin_stats = conn.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT code), MAX(announce_date)
+            FROM financial_pershareindex
+            WHERE announce_date IS NOT NULL
+            """
+        ).fetchone()
+        fin_count = int(fin_stats[0] or 0) if fin_stats else 0
+        fin_codes = int(fin_stats[1] or 0) if fin_stats else 0
+        fin_announce_max = (
+            str(fin_stats[2])[:10] if fin_stats and fin_stats[2] else None
+        )
+        fin_watermark = get_meta(conn, f"financial_watermark:{sector}")
+        if fin_watermark:
+            fin_watermark = fin_watermark[:10]
         checks.append(
             {
                 "name": "财务披露",
                 "ok": fin_count > 0,
                 "coverage": "—",
-                "detail": f"{fin_count} 条每股指标",
+                "detail": f"{fin_count} 条每股指标（{fin_codes} 只）",
             }
         )
 
         qstats = quality_stats(conn, adjust_type=adjust)
+        bar_range = get_date_range(conn, adjust)
         checks.append(
             {
                 "name": "数据质量",
@@ -190,6 +204,12 @@ def _run_data_check_uncached(
             "universe_total": universe_total,
             "universe_estimated": universe_estimated,
             "quality": qstats,
+            "bar_date_min": bar_range.get("min_date"),
+            "bar_date_max": bar_range.get("max_date"),
+            "financial_row_count": fin_count,
+            "financial_codes_count": fin_codes,
+            "financial_announce_max": fin_announce_max,
+            "financial_watermark": fin_watermark,
             "freshness": freshness,
             "stale_codes": gap_info.get("stale_codes") or [],
             "gap_summary": gap_summary,

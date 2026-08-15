@@ -1,9 +1,11 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { apiGet } from "./api";
+import { inferJobTypeFromMessage, jobTypeLabel } from "./jobTypes";
 
 export type JobState = {
   jobId: string;
+  jobType: string;
   progress: number;
   status: string;
   message: string;
@@ -15,7 +17,7 @@ export type JobState = {
 
 export type JobTrackerValue = JobState & {
   isRunning: boolean;
-  trackJob: (jobId: string, message?: string) => void;
+  trackJob: (jobId: string, message?: string, jobType?: string) => void;
   resetJob: () => void;
   cancelJob: () => Promise<boolean>;
   resumeJob: () => Promise<void>;
@@ -25,6 +27,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 const EMPTY_STATE: JobState = {
   jobId: "",
+  jobType: "",
   progress: 0,
   status: "",
   message: "",
@@ -35,6 +38,13 @@ const EMPTY_STATE: JobState = {
 };
 
 const JobContext = React.createContext<JobTrackerValue | null>(null);
+
+function resolveJobType(data: Record<string, unknown>, prev: JobState): string {
+  const explicit = String(data.job_type || "");
+  if (explicit) return explicit;
+  const message = String(data.message || data.progress_message || prev.message || "");
+  return inferJobTypeFromMessage(message) || prev.jobType;
+}
 
 function applyJobPayload(
   prev: JobState,
@@ -49,6 +59,7 @@ function applyJobPayload(
     Boolean(data.cancelling) || (prev.cancelling && status === "running");
   return {
     jobId,
+    jobType: resolveJobType(data, prev),
     progress: Number(data.progress ?? prev.progress ?? 0),
     status,
     message: String(data.message || data.progress_message || prev.message || ""),
@@ -67,11 +78,13 @@ function applyJobPayload(
 function stateFromApiJob(job: Record<string, unknown>): JobState {
   const status = String(job.status || "");
   const result = job.result_json as Record<string, unknown> | undefined;
+  const message = String(job.progress_message || job.display_name || "");
   return {
     jobId: String(job.id || ""),
+    jobType: String(job.job_type || inferJobTypeFromMessage(message) || ""),
     progress: Number(job.progress ?? 0.05),
     status,
-    message: String(job.progress_message || job.display_name || ""),
+    message,
     error: job.error_message ? String(job.error_message) : null,
     canResume: status === "cancelled" && !!result?.checkpoint,
     cancelling: Boolean(job.cancel_requested),
@@ -82,6 +95,7 @@ function stateFromApiJob(job: Record<string, unknown>): JobState {
 export function JobProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<JobState>(EMPTY_STATE);
   const jobIdRef = React.useRef("");
+  const jobTypeRef = React.useRef("");
   const restoredRef = React.useRef(false);
 
   const handleUpdate = React.useCallback((data: Record<string, unknown>) => {
@@ -90,24 +104,30 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => applyJobPayload(prev, data, id));
   }, []);
 
-  const trackJob = React.useCallback((jobId: string, message = "任务已提交…") => {
-    jobIdRef.current = jobId;
-    setState({
-      jobId,
-      progress: 0.05,
-      status: "running",
-      message,
-      error: null,
-      canResume: false,
-      cancelling: false,
-      etaSeconds: null,
-    });
-  }, []);
+  const trackJob = React.useCallback(
+    (jobId: string, message = "任务已提交…", jobType = "") => {
+      jobIdRef.current = jobId;
+      jobTypeRef.current = jobType || inferJobTypeFromMessage(message);
+      setState({
+        jobId,
+        jobType: jobTypeRef.current,
+        progress: 0.05,
+        status: "running",
+        message,
+        error: null,
+        canResume: false,
+        cancelling: false,
+        etaSeconds: null,
+      });
+    },
+    []
+  );
 
   const adoptJob = React.useCallback((job: Record<string, unknown>) => {
     const next = stateFromApiJob(job);
     if (!next.jobId) return;
     jobIdRef.current = next.jobId;
+    jobTypeRef.current = next.jobType;
     setState(next);
   }, []);
 
@@ -157,6 +177,7 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
         const job = await res.json();
         handleUpdate({
           job_id: id,
+          job_type: job.job_type,
           status: job.status,
           progress: job.progress,
           message: job.progress_message,
@@ -178,6 +199,7 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
 
   const resetJob = React.useCallback(() => {
     jobIdRef.current = "";
+    jobTypeRef.current = "";
     setState(EMPTY_STATE);
   }, []);
 
@@ -192,7 +214,7 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({
       ...prev,
       cancelling: true,
-      message: "正在中断，等待当前股票下载结束…",
+      message: "正在中断，等待当前批次结束…",
     }));
     return true;
   }, []);
@@ -206,7 +228,7 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
       throw new Error(text || "续传失败");
     }
     const data = await res.json();
-    trackJob(data.job_id, "续传同步中…");
+    trackJob(data.job_id, "续传同步中…", jobTypeRef.current);
   }, [trackJob]);
 
   const isRunning = state.status === "running" || state.status === "pending";
@@ -241,13 +263,15 @@ export function GlobalJobBanner() {
   if (!job.isRunning && job.status !== "cancelled") return null;
 
   const pct = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);
-  const dataRoute = job.message.includes("同步") || job.message.includes("更新") ? "/data" : "/";
+  const typeLabel = jobTypeLabel(job.jobType || inferJobTypeFromMessage(job.message));
+  const dataRoute =
+    job.jobType === "sync_financial" || job.jobType === "sync_bars" ? "/data" : "/";
 
   return (
     <div className="border-b border-emerald-900/40 bg-emerald-950/40 px-6 py-2">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 text-sm">
         <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
-          任务进行中
+          {typeLabel}进行中
         </Link>
         <span className="min-w-0 flex-1 truncate text-slate-300">{job.message || "运行中…"}</span>
         <span className="shrink-0 text-slate-400">{pct}%</span>
