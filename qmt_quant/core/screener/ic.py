@@ -21,6 +21,7 @@ def compute_factor_ic(
     template_id: str = "low_pe",
     sector: str = "沪深A股",
     horizons: Optional[List[int]] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     horizons = horizons or [5, 20]

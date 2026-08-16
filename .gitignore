@@ -1,5 +1,5 @@
-# data
-data/
+# runtime data (repo root only — do not ignore qmt_quant/core/data Python package)
+/data/
 *.db
 *.db-journal
 

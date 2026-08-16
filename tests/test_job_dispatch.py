@@ -40,6 +40,16 @@ def test_dispatch_builtin_research():
     mock.assert_called_once()
 
 
+def test_dispatch_builtin_research_accepts_job_id():
+    with patch("qmt_quant.core.research.runner.run_research", return_value={"ok": True}) as mock:
+        out = runner._dispatch_builtin(
+            "research",
+            {"strategy_id": "ma_cross", "job_id": "job-123"},
+        )
+    assert out == {"ok": True}
+    mock.assert_called_once_with(strategy_id="ma_cross", job_id="job-123")
+
+
 def test_dispatch_builtin_walk_forward():
     with patch("qmt_quant.core.research.walk_forward.run_walk_forward_study", return_value={"segments": []}) as mock:
         out = runner._dispatch_builtin("walk_forward", {"strategy_id": "ma_cross"})

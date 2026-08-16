@@ -26,6 +26,7 @@ def run_screening(
     ma_window: Optional[int] = None,
     list_days_lt: Optional[int] = 120,
     rule: Optional[ScreeningRule] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     if rule is None:

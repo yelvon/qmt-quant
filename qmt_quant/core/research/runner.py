@@ -11,6 +11,7 @@ import pandas as pd
 
 from qmt_quant.config import ROOT_DIR, get_settings
 from qmt_quant.core.catalog.export import load_price_matrix
+from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import FEE_PRESETS, ma_param_combos
 from qmt_quant.core.research.report import build_quantstats_summary
@@ -30,9 +31,12 @@ def run_research(
     fee_preset: str = "default",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     settings = get_settings()
+    if job_id:
+        report_job_progress(job_id, 0.08, "加载行情数据…")
     start, end = resolve_range_preset(range_preset)
     if screen_run_id:
         universe = load_codes_by_run_id(screen_run_id)
@@ -54,6 +58,9 @@ def run_research(
     )
     if prices.empty:
         return {"error": "no_price_data", "message": "请先同步日线数据"}
+
+    if job_id:
+        report_job_progress(job_id, 0.35, f"运行策略 {strategy_id}…")
 
     fees = FEE_PRESETS.get(fee_preset, FEE_PRESETS["default"])["commission_rate"]
 
@@ -77,6 +84,9 @@ def run_research(
     label = result["best"].get("label", strategy_id).replace("/", "_")
     result_path = reports_dir / f"research_{label}.json"
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if job_id:
+        report_job_progress(job_id, 0.85, "保存回测结果…")
 
     with db_session() as conn:
         run_id = save_backtest_run(

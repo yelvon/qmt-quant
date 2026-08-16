@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -97,6 +97,7 @@ def run_walk_forward_study(
     train_bars: int = 252,
     test_bars: int = 63,
     step_bars: int | None = None,
+    job_id: Optional[str] = None,
 ) -> dict:
     """Load prices and run walk-forward analysis, persisting results."""
     run_migrations()

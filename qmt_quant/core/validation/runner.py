@@ -28,6 +28,7 @@ def run_validation(
     screen_run_id: Optional[str] = None,
     codes: Optional[list[str]] = None,
     engine: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     settings = get_settings()

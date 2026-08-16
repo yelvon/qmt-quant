@@ -49,6 +49,7 @@ def run_screen_backtest(
     run_id: str,
     engine: str = "vectorbt",
     range_preset: str = "3y",
+    job_id: Optional[str] = None,
 ) -> dict:
     codes = load_codes_by_run_id(run_id)
     if not codes:
