@@ -102,13 +102,16 @@ export default function ResearchPage() {
 
   useEffect(() => {
     apiGet<any[]>("/api/options/strategies").then(setStrategies);
-    apiGet<any[]>("/api/options/sectors").then(setSectors);
+    const loadSectors = () => apiGet<any[]>("/api/options/sectors").then(setSectors);
+    loadSectors();
+    window.addEventListener("focus", loadSectors);
     apiGet<any[]>("/api/options/ranges").then(setRanges);
     apiGet<{ short: RunOption[]; long: RunOption[] }>("/api/options/ma-presets").then(setMa);
     apiGet<RunOption[]>("/api/options/research-runs").then(setHistoryRuns).catch(() => setHistoryRuns([]));
     apiGet<RunOption[]>("/api/options/validate-runs")
       .then(setValidateHistory)
       .catch(() => setValidateHistory([]));
+    return () => window.removeEventListener("focus", loadSectors);
   }, []);
 
   const loadResearchDetail = useCallback(async (id: string) => {
@@ -451,6 +454,19 @@ export default function ResearchPage() {
           </div>
         )}
       </div>
+
+      {isPool && sector === "watchlist" && (
+        <p className="mt-2 text-xs text-slate-500">
+          当前使用
+          <Link to="/data#watchlist" className="mx-1 underline hover:text-slate-300">
+            我的自选池
+          </Link>
+          中的股票（回测最多取前 50 只）。
+          <Link to="/data#watchlist" className="ml-1 underline hover:text-slate-300">
+            编辑自选池 →
+          </Link>
+        </p>
+      )}
 
       {strategy === "pe_momentum" && (
         <p className="mt-2 text-xs text-amber-300/90">

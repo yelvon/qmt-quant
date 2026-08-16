@@ -2,27 +2,34 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List, Optional, Sequence
 
-from qmt_quant.adapters.qmt.client import XtDataClient, normalize_code
+from qmt_quant.adapters.qmt.client import XtDataClient
 from qmt_quant.config import get_settings
 from qmt_quant.storage.database import db_session
+from qmt_quant.storage.instruments import (
+    NAME_MISSING_SQL as _NAME_MISSING_SQL,
+    backfill_missing_names,
+    backfill_names_after_sync,
+)
+
+__all__ = [
+    "_NAME_MISSING_SQL",
+    "backfill_instrument_names_after_sync",
+    "backfill_missing_instrument_names",
+    "list_days_since",
+    "load_watchlist",
+    "resolve_universe",
+    "sync_universe",
+]
 
 
 def load_watchlist(path: Path | None = None) -> List[str]:
-    settings = get_settings()
-    p = path or settings.resolve_path(settings.watchlist_path)
-    if not p.exists():
-        return []
-    codes = []
-    for line in p.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            codes.append(normalize_code(line))
-    return codes
+    from qmt_quant.core.watchlist import read_watchlist_codes
+
+    return read_watchlist_codes(path)
 
 
 def resolve_universe(sector: str | None = None) -> List[str]:
@@ -50,86 +57,39 @@ def _universe_from_db() -> List[str]:
     return [r[0] for r in rows]
 
 
-def refresh_instrument_names(
+def backfill_instrument_names_after_sync(
+    conn,
+    codes: Sequence[str],
+    *,
+    client: XtDataClient | None = None,
+    job_id: Optional[str] = None,
+    batch_size: int = 50,
+) -> int:
+    """Fill instrument.name from QMT after bar sync (missing names only)."""
+    return backfill_names_after_sync(
+        conn,
+        codes,
+        client=client,
+        job_id=job_id,
+        batch_size=batch_size,
+    )
+
+
+def backfill_missing_instrument_names(
     conn,
     *,
-    q: str | None = None,
-    codes: List[str] | None = None,
-    limit: int = 40,
     client: XtDataClient | None = None,
+    limit: int = 300,
+    sector: str | None = None,
 ) -> int:
-    """Fill missing instrument.name rows (lazy, for browse/search)."""
-    if client is None:
-        client = XtDataClient()
-    params: List[Any] = []
-    if codes:
-        placeholders = ",".join(["%s"] * len(codes))
-        sql = f"""
-            SELECT code FROM instrument
-            WHERE code IN ({placeholders}) AND (name IS NULL OR name = '' OR name = code)
-        """
-        params = list(codes)
-    elif q:
-        q = q.strip()
-        if re.search(r"[\u4e00-\u9fff]", q):
-            from qmt_quant.core.data.query import _STOCK_NAME_ALIASES
-
-            alias = _STOCK_NAME_ALIASES.get(q) or next(
-                (code for name, code in _STOCK_NAME_ALIASES.items() if name in q or q in name),
-                None,
-            )
-            if alias:
-                sql = "SELECT code FROM instrument WHERE code = %s"
-                params = [alias]
-            else:
-                sql = """
-                    SELECT i.code FROM instrument i
-                    WHERE (i.name IS NULL OR i.name = '' OR i.name = i.code)
-                      AND EXISTS (SELECT 1 FROM daily_bar b WHERE b.code = i.code)
-                    ORDER BY i.code
-                    LIMIT %s
-                """
-                params = [limit * 5]
-        else:
-            like = f"%{q}%"
-            sql = """
-                SELECT i.code FROM instrument i
-                WHERE (i.name IS NULL OR i.name = '' OR i.name = i.code)
-                  AND (i.code LIKE %s OR i.code IN (
-                        SELECT DISTINCT code FROM daily_bar WHERE code LIKE %s
-                  ))
-                ORDER BY i.code
-                LIMIT %s
-            """
-            params = [like, like, limit]
-    else:
-        sql = """
-            SELECT i.code FROM instrument i
-            WHERE (i.name IS NULL OR i.name = '' OR i.name = i.code)
-              AND EXISTS (SELECT 1 FROM daily_bar b WHERE b.code = i.code)
-            ORDER BY i.code
-            LIMIT %s
-        """
-        params = [limit]
-
-    rows = conn.execute(sql, params).fetchall()
-    updated = 0
-    for (code,) in rows:
-        try:
-            detail = client.get_instrument_detail(code)
-        except Exception:
-            continue
-        name = detail.get("InstrumentName") or detail.get("name")
-        if not name or name == code.split(".")[0]:
-            continue
-        conn.execute(
-            "UPDATE instrument SET name = %s, updated_at = NOW() WHERE code = %s",
-            (name, code),
-        )
-        updated += 1
-        if q and q.strip() in (name or ""):
-            break
-    return updated
+    """Manual / API backfill for instruments missing names."""
+    sector_codes = list(resolve_universe(sector)) if sector else None
+    return backfill_missing_names(
+        conn,
+        client=client,
+        limit=limit,
+        sector_codes=sector_codes,
+    )
 
 
 def sync_universe(sector: str | None = None) -> int:

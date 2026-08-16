@@ -186,6 +186,20 @@ def sync_bars(
     except Exception:
         sync_calendar_from_bars()
 
+    names_backfilled = 0
+    try:
+        with db_session() as conn:
+            from qmt_quant.storage.instruments import backfill_names_after_sync
+
+            names_backfilled = backfill_names_after_sync(
+                conn,
+                codes,
+                client=client,
+                job_id=job_id,
+            )
+    except Exception:
+        pass
+
     result: Dict[str, object] = {
         "sector": sector,
         "codes": total_codes,
@@ -196,6 +210,8 @@ def sync_bars(
         "bars_written": written,
         "resumed_from": processed_base if resume_checkpoint else 0,
     }
+    if names_backfilled:
+        result["names_backfilled"] = names_backfilled
     if range_preset:
         result["range_preset"] = range_preset
 

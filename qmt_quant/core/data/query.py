@@ -95,18 +95,6 @@ def clear_browse_query_cache() -> None:
     _CROSS_SECTION_COUNT_CACHE.clear()
 
 
-def _try_backfill_instrument_names(conn: DbConnection, q: str, limit: int = 40) -> None:
-    if not q or not q.strip():
-        return
-    try:
-        from qmt_quant.adapters.qmt.client import XtDataClient
-        from qmt_quant.core.sync.universe import refresh_instrument_names
-
-        refresh_instrument_names(conn, q=q, limit=limit, client=XtDataClient())
-    except Exception:
-        return
-
-
 def resolve_stock_code(conn: DbConnection, query: str) -> str:
     raw = (query or "").strip()
     if not raw:
@@ -146,18 +134,6 @@ def resolve_stock_code(conn: DbConnection, query: str) -> str:
         return fuzzy[0]
 
     if _HAS_CJK_RE.search(raw):
-        _try_backfill_instrument_names(conn, raw)
-        retry = conn.execute(
-            """
-            SELECT code FROM instrument
-            WHERE code LIKE %s OR name LIKE %s
-            ORDER BY CASE WHEN name = %s THEN 0 WHEN name LIKE %s THEN 1 ELSE 2 END, code
-            LIMIT 1
-            """,
-            (like, like, raw, f"{raw}%"),
-        ).fetchone()
-        if retry:
-            return retry[0]
         raise ValueError("unknown_stock")
 
     if re.search(r"\d", raw):
@@ -173,13 +149,9 @@ def _validate_sort(sort_col: Optional[str], allowed: set[str]) -> str:
 
 
 def _fetch_instrument_names(conn: DbConnection, codes: List[str]) -> Dict[str, Optional[str]]:
-    if not codes:
-        return {}
-    rows = conn.execute(
-        "SELECT code, name FROM instrument WHERE code = ANY(%s)",
-        (codes,),
-    ).fetchall()
-    return {code: name for code, name in rows}
+    from qmt_quant.storage.instruments import get_name_map
+
+    return get_name_map(conn, codes)
 
 
 def _bar_rows_to_dicts(rows: List[tuple], names: Dict[str, Optional[str]]) -> List[Dict[str, Any]]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
@@ -267,12 +268,20 @@ class XtDataClient:
 
 
 def normalize_code(code: str) -> str:
-    code = code.strip().upper()
-    if "." in code:
-        return code
-    if code.startswith(("6", "5", "9")):
-        return f"{code}.SH"
-    return f"{code}.SZ"
+    raw = code.strip().upper()
+    match = re.match(r"^(\d{6})(?:\.(SH|SZ))?$", raw)
+    if match:
+        digits, suffix = match.group(1), match.group(2)
+        if suffix:
+            return f"{digits}.{suffix}"
+        if digits.startswith(("6", "5", "9")):
+            return f"{digits}.SH"
+        return f"{digits}.SZ"
+    if "." in raw:
+        base, suffix = raw.rsplit(".", 1)
+        if suffix in ("SH", "SZ") and re.fullmatch(r"\d{6}", base):
+            return f"{base}.{suffix}"
+    return raw
 
 
 def to_qmt_date(date_str: str) -> str:

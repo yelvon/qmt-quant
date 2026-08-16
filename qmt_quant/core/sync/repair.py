@@ -234,6 +234,20 @@ def sync_bars_repair(
     except Exception:
         sync_calendar_from_bars()
 
+    names_backfilled = 0
+    try:
+        with db_session() as conn:
+            from qmt_quant.storage.instruments import backfill_names_after_sync
+
+            names_backfilled = backfill_names_after_sync(
+                conn,
+                codes,
+                client=client,
+                job_id=job_id,
+            )
+    except Exception:
+        pass
+
     result: Dict[str, object] = {
         "sector": sector_name,
         "codes": len(codes),
@@ -241,6 +255,8 @@ def sync_bars_repair(
         "bars_written": written,
         "adjust_type": adjust_type,
     }
+    if names_backfilled:
+        result["names_backfilled"] = names_backfilled
 
     if settings.auto_export_catalog:
         from qmt_quant.core.catalog.export import export_catalog

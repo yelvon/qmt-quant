@@ -163,6 +163,10 @@ class SettingsBody(BaseModel):
     sync_auto_repair: Optional[bool] = None
 
 
+class WatchlistBody(BaseModel):
+    codes: List[str] = Field(default_factory=list)
+
+
 class TradeBody(BaseModel):
     codes: List[str]
     side: str = "buy"
@@ -385,6 +389,25 @@ def create_app() -> FastAPI:
             "columns": meta.get("columns", []),
             **result,
         }
+
+    @app.post("/api/data/backfill-names")
+    def api_backfill_names(limit: int = 300, sector: Optional[str] = None) -> Dict[str, Any]:
+        from qmt_quant.storage.instruments import backfill_missing_names, count_missing_names
+
+        cap = max(1, min(limit, 500))
+        with db_session() as conn:
+            sector_codes = None
+            if sector:
+                from qmt_quant.core.sync.universe import resolve_universe
+
+                sector_codes = resolve_universe(sector)
+            updated = backfill_missing_names(
+                conn,
+                limit=cap,
+                sector_codes=sector_codes,
+            )
+            remaining = count_missing_names(conn)
+        return {"updated": updated, "remaining": int(remaining or 0)}
 
     @app.get("/api/data/kline")
     def api_data_kline(
@@ -758,11 +781,17 @@ def create_app() -> FastAPI:
 
     @app.get("/api/options/sectors")
     def options_sectors() -> List[Dict[str, str]]:
+        from qmt_quant.core.sync.universe import load_watchlist
+
+        watchlist_count = len(load_watchlist())
+        watchlist_label = (
+            f"我的自选池（{watchlist_count} 只）" if watchlist_count else "我的自选池"
+        )
         return [
             {"id": "沪深A股", "label": "沪深A股"},
             {"id": "沪深300", "label": "沪深300"},
             {"id": "中证500", "label": "中证500"},
-            {"id": "watchlist", "label": "我的自选池"},
+            {"id": "watchlist", "label": watchlist_label},
         ]
 
     @app.get("/api/options/strategies")
@@ -857,6 +886,25 @@ def create_app() -> FastAPI:
         from qmt_quant.core.screener.bridge import load_codes_by_run_id
 
         return {"codes": load_codes_by_run_id(run_id)}
+
+    @app.get("/api/watchlist")
+    def api_get_watchlist() -> Dict[str, Any]:
+        from qmt_quant.core.watchlist import list_watchlist_items, watchlist_path_display
+
+        return {
+            "items": list_watchlist_items(),
+            "path": watchlist_path_display(),
+        }
+
+    @app.put("/api/watchlist")
+    def api_put_watchlist(body: WatchlistBody) -> Dict[str, Any]:
+        from qmt_quant.core.watchlist import list_watchlist_items, save_watchlist
+
+        try:
+            save_watchlist(body.codes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"items": list_watchlist_items()}
 
     @app.get("/api/settings")
     def api_get_settings() -> Dict[str, Any]:

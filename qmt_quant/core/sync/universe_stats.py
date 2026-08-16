@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from qmt_quant.storage.database import DbConnection
+from qmt_quant.storage.instruments import ensure_codes
 from qmt_quant.storage.sync_meta import get_meta, set_meta
 
 
@@ -18,13 +19,7 @@ def record_universe_count(conn: DbConnection, sector: str, count: int) -> None:
 
 
 def ensure_instrument_codes(conn: DbConnection, codes: Sequence[str]) -> None:
-    if not codes:
-        return
-    with conn.cursor() as cur:
-        cur.executemany(
-            "INSERT INTO instrument(code) VALUES (%s) ON CONFLICT(code) DO NOTHING",
-            [(c,) for c in codes],
-        )
+    ensure_codes(conn, codes)
 
 
 def resolve_universe_total(

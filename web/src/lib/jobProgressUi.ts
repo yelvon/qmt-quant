@@ -15,6 +15,7 @@ export const JOB_STEP_DEFS: Record<string, JobStepDef[]> = {
   sync_bars: [
     { id: "prepare", label: "准备" },
     { id: "sync", label: "下载入库" },
+    { id: "names", label: "补全名称" },
     { id: "export", label: "导出文件" },
   ],
   sync_financial: [
@@ -24,6 +25,7 @@ export const JOB_STEP_DEFS: Record<string, JobStepDef[]> = {
   ],
   sync_repair: [
     { id: "repair", label: "补数修复" },
+    { id: "names", label: "补全名称" },
   ],
   sync_check_repair: [
     { id: "check", label: "检测缺口" },

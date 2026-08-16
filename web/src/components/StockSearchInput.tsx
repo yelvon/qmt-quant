@@ -1,11 +1,17 @@
-import React, { useEffect, useId, useRef, useState } from "react";
-import { searchInstruments } from "../lib/dataApi";
+import React, { useEffect, useId, useImperativeHandle, useRef, useState } from "react";
+import { resolveStockQuery } from "../lib/resolveStock";
+import { searchInstruments, type InstrumentRow } from "../lib/dataApi";
 
-type InstrumentRow = { code: string; name?: string | null };
+export type StockSearchInputHandle = {
+  resolve: () => Promise<InstrumentRow | null>;
+  getText: () => string;
+};
 
 type Props = {
   value: string;
   onChange: (code: string) => void;
+  onTextChange?: (text: string) => void;
+  onPick?: (row: InstrumentRow) => void;
   onResolved?: (code: string) => void;
   label?: string;
   placeholder?: string;
@@ -20,19 +26,31 @@ function looksLikeSelectedLabel(text: string): boolean {
   return /（.+\..+）$/.test(text.trim());
 }
 
-export default function StockSearchInput({
-  value,
-  onChange,
-  onResolved,
-  label = "股票",
-  placeholder = "输入代码或名称，如 600519 或 贵州茅台",
-}: Props) {
+const StockSearchInput = React.forwardRef<StockSearchInputHandle, Props>(function StockSearchInput(
+  {
+    value,
+    onChange,
+    onTextChange,
+    onPick,
+    onResolved,
+    label = "股票",
+    placeholder = "输入代码或名称，如 600519 或 贵州茅台",
+  },
+  ref
+) {
   const listId = useId();
   const blurTimer = useRef<number | null>(null);
+  const textRef = useRef("");
   const [text, setText] = useState("");
   const [options, setOptions] = useState<InstrumentRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+
+  textRef.current = text;
+
+  useEffect(() => {
+    onTextChange?.(text);
+  }, [text, onTextChange]);
 
   useEffect(() => {
     if (!value) {
@@ -77,8 +95,34 @@ export default function StockSearchInput({
     setOpen(false);
     setOptions([]);
     onChange(row.code);
+    onPick?.(row);
     onResolved?.(row.code);
   }
+
+  async function resolveCurrentInput(): Promise<InstrumentRow | null> {
+    const q = textRef.current.trim();
+    if (!q) return null;
+    if (looksLikeSelectedLabel(q)) {
+      const codeMatch = q.match(/（(.+\..+)）$/);
+      if (codeMatch) {
+        return { code: codeMatch[1], name: q.replace(/（.+）$/, "") };
+      }
+    }
+    const matched =
+      options.find((row) => row.code === q || formatLabel(row) === q) ||
+      (await resolveStockQuery(q));
+    if (matched) {
+      onChange(matched.code);
+      setText(formatLabel(matched));
+      return matched;
+    }
+    return null;
+  }
+
+  useImperativeHandle(ref, () => ({
+    resolve: resolveCurrentInput,
+    getText: () => textRef.current,
+  }));
 
   async function commitTypedCode() {
     const q = text.trim();
@@ -89,32 +133,15 @@ export default function StockSearchInput({
     if (looksLikeSelectedLabel(q)) {
       return;
     }
-    const matched =
-      options.find((row) => row.code === q || formatLabel(row) === q) ||
-      (await searchInstruments(q, 5).then((rows) =>
-        rows.find((row) => row.code === q || row.name === q)
-      ));
-    if (matched) {
-      pick(matched);
-      return;
-    }
-    if (/^\d{6}(\.(SH|SZ))?$/i.test(q)) {
-      const normalized = q.toUpperCase().includes(".") ? q.toUpperCase() : q;
-      onChange(normalized);
-      onResolved?.(normalized);
+    const resolved = await resolveCurrentInput();
+    if (resolved) {
       return;
     }
     const candidates = options.length ? options : await searchInstruments(q, 5);
-    if (candidates.length === 1) {
-      pick(candidates[0]);
-      return;
-    }
     if (candidates.length > 1) {
       setOptions(candidates);
       setOpen(true);
-      return;
     }
-    onChange(q);
   }
 
   return (
@@ -173,4 +200,6 @@ export default function StockSearchInput({
       )}
     </div>
   );
-}
+});
+
+export default StockSearchInput;

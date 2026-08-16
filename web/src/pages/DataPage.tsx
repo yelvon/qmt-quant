@@ -15,6 +15,7 @@ import DataHealthPanel from "../components/DataHealthPanel";
 import SyncModeSelector from "../components/SyncModeSelector";
 import SyncPlanPreview from "../components/SyncPlanPreview";
 import FinancialSyncPanel from "../components/FinancialSyncPanel";
+import WatchlistPanel from "../components/WatchlistPanel";
 import ResumableSyncBanner, { type ResumableJob } from "../components/ResumableSyncBanner";
 import {
   FULL_SYNC_RANGE_OPTIONS,
@@ -134,6 +135,8 @@ export default function DataPage() {
   const [activePlanSummary, setActivePlanSummary] = useState<string>("");
   const [resumableJobs, setResumableJobs] = useState<ResumableJob[]>([]);
   const [resumingJobId, setResumingJobId] = useState<string | null>(null);
+  const [nameBackfillLoading, setNameBackfillLoading] = useState(false);
+  const [nameBackfillMsg, setNameBackfillMsg] = useState<string | null>(null);
 
   const job = useJobTracker();
   const effectiveJobType = job.jobType || inferJobTypeFromMessage(job.message);
@@ -178,6 +181,14 @@ export default function DataPage() {
   useEffect(() => {
     refreshResumable();
   }, [refreshResumable]);
+
+  useEffect(() => {
+    if (window.location.hash === "#watchlist") {
+      window.setTimeout(() => {
+        document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  }, []);
 
   useEffect(() => {
     if (job.status === "completed" || job.status === "cancelled") {
@@ -467,6 +478,21 @@ export default function DataPage() {
     }
   }
 
+  async function backfillInstrumentNames() {
+    setNameBackfillLoading(true);
+    setNameBackfillMsg(null);
+    try {
+      const res = await apiPost<{ updated: number; remaining: number }>(
+        `/api/data/backfill-names?limit=300&sector=${encodeURIComponent(sector)}`
+      );
+      setNameBackfillMsg(`已补全 ${res.updated} 只股票名称，尚有 ${res.remaining} 只待补全（可多次点击）`);
+    } catch (err) {
+      setNameBackfillMsg(parseApiError(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setNameBackfillLoading(false);
+    }
+  }
+
   const progressExtras = {
     cancelling,
     resuming,
@@ -530,7 +556,14 @@ export default function DataPage() {
         onResume={resumeFromJob}
       />
 
-      <div className="card mb-4 space-y-5">
+      <WatchlistPanel
+        onSyncWatchlist={() => {
+          setSector("watchlist");
+          document.getElementById("data-sync")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
+      />
+
+      <div id="data-sync" className="card mb-4 scroll-mt-24 space-y-5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-medium text-slate-100">日线 K 线</h2>
           {barsBlocked && (
@@ -667,7 +700,15 @@ export default function DataPage() {
             >
               检查并修复
             </button>
+            <button
+              className="btn-secondary"
+              disabled={nameBackfillLoading || qmtOk === false}
+              onClick={backfillInstrumentNames}
+            >
+              {nameBackfillLoading ? "补全名称中…" : "补全股票名称"}
+            </button>
           </div>
+          {nameBackfillMsg && <p className="text-xs text-slate-400">{nameBackfillMsg}</p>}
 
           {repairJobActive && (
             <JobProgressBar

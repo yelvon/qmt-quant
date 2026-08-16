@@ -15,13 +15,11 @@ def _fetch_instrument_names(codes: List[str]) -> Dict[str, str]:
     if not codes:
         return {}
     try:
+        from qmt_quant.storage.instruments import get_name_map
+
         with db_session() as conn:
-            placeholders = ",".join(["%s"] * len(codes))
-            rows = conn.execute(
-                f"SELECT code, name FROM instrument WHERE code IN ({placeholders})",
-                tuple(codes),
-            ).fetchall()
-        return {str(code): str(name or "") for code, name in rows}
+            names = get_name_map(conn, codes)
+        return {code: str(name or "") for code, name in names.items()}
     except Exception:
         return {}
 

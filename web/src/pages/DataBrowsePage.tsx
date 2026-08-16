@@ -260,11 +260,11 @@ export default function DataBrowsePage() {
   return (
     <div>
       <PageCallout>
-        浏览已同步的日线与证券列表。若无数据请先在{" "}
+        浏览已同步的日线与证券列表。若无数据或名称显示「—」，请先在{" "}
         <Link to="/data" className="text-emerald-400 hover:underline">
           ② 准备数据
         </Link>{" "}
-        同步。
+        同步日线，并在「其他操作」中点「补全股票名称」。增量/全量同步完成后也会自动补全本次股票池的名称。
       </PageCallout>
 
       <div className="mb-4 flex flex-wrap gap-2">
