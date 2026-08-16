@@ -19,7 +19,7 @@ data:
   default_sector: "沪深A股"
   bar_adjust_type: "front"
   sync_batch_size: 50
-  auto_export_catalog: true
+  auto_export_catalog: false
   sync:
     incremental_days: 5
     stale_trading_days: 3

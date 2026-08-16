@@ -9,17 +9,51 @@ import psycopg
 from psycopg import Connection
 from psycopg.rows import tuple_row
 
+try:
+    from psycopg_pool import ConnectionPool
+except ImportError:  # pragma: no cover - optional until deps refreshed
+    ConnectionPool = None  # type: ignore[misc, assignment]
+
 from qmt_quant.config import ROOT_DIR, get_settings
 
 MIGRATIONS_DIR = ROOT_DIR / "migrations"
 
 DbConnection = Connection[tuple]
 
+_pool: ConnectionPool | None = None
+_pool_dsn: str | None = None
+
 
 def get_database_url(override: Optional[str] = None) -> str:
     if override:
         return override
     return get_settings().database_url
+
+
+def _get_pool(dsn: str) -> ConnectionPool:
+    if ConnectionPool is None:
+        raise RuntimeError("psycopg-pool is not installed; run: pip install psycopg-pool")
+    global _pool, _pool_dsn
+    if _pool is None or _pool_dsn != dsn:
+        if _pool is not None:
+            _pool.close()
+        _pool = ConnectionPool(
+            dsn,
+            min_size=1,
+            max_size=8,
+            kwargs={"row_factory": tuple_row},
+            open=True,
+        )
+        _pool_dsn = dsn
+    return _pool
+
+
+def close_pool() -> None:
+    global _pool, _pool_dsn
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+        _pool_dsn = None
 
 
 def connect(dsn: Optional[str] = None) -> DbConnection:
@@ -34,17 +68,51 @@ def connect(dsn: Optional[str] = None) -> DbConnection:
 
 @contextmanager
 def db_session(dsn: Optional[str] = None) -> Generator[DbConnection, None, None]:
-    conn = connect(dsn)
-    try:
-        yield conn
-        from qmt_quant.storage.db_retry import run_db_retry
+    url = get_database_url(dsn) if dsn else get_database_url()
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL / data.db_url is not configured. "
+            "Start PostgreSQL (docker compose up -d) and set DATABASE_URL."
+        )
 
-        run_db_retry(conn.commit)
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    if dsn:
+        conn = connect(dsn)
+        try:
+            yield conn
+            from qmt_quant.storage.db_retry import run_db_retry
+
+            run_db_retry(conn.commit)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
+
+    if ConnectionPool is None:
+        conn = connect()
+        try:
+            yield conn
+            from qmt_quant.storage.db_retry import run_db_retry
+
+            run_db_retry(conn.commit)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
+
+    pool = _get_pool(url)
+    with pool.connection() as conn:
+        try:
+            yield conn
+            from qmt_quant.storage.db_retry import run_db_retry
+
+            run_db_retry(conn.commit)
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _split_sql(script: str) -> List[str]:

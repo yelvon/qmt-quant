@@ -381,6 +381,7 @@ def create_app() -> FastAPI:
             "incremental": body.incremental,
             "incremental_days": body.days,
             "adjust_type": body.adjust,
+            "mode": "incremental" if body.incremental else "full",
         }
         if body.range_preset and not body.incremental:
             start, end = resolve_range_preset(body.range_preset)

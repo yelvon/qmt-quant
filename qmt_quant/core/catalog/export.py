@@ -3,17 +3,34 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Sequence
 
 import pandas as pd
 
 from qmt_quant.config import get_settings
-from qmt_quant.storage.bars import load_bars_df
+from qmt_quant.core.jobs.context import report_job_progress
+from qmt_quant.storage.bars import list_bar_codes, load_bars_df
 from qmt_quant.storage.database import db_session, run_migrations
 
 
-def export_catalog(*, adjust_type: str = "front", fmt: str = "flat") -> Dict[str, object]:
+def _write_code_frame(frame: pd.DataFrame, path_base, adjust_type: str) -> str:
+    path = path_base.parent / f"{path_base.name}_{adjust_type}.parquet"
+    try:
+        frame.to_parquet(path, index=False)
+        return path.name
+    except ImportError:
+        path = path_base.parent / f"{path_base.name}_{adjust_type}.csv"
+        frame.to_csv(path, index=False)
+        return path.name
+
+
+def export_catalog(
+    *,
+    adjust_type: str = "front",
+    fmt: str = "flat",
+    codes: Optional[Sequence[str]] = None,
+    job_id: Optional[str] = None,
+) -> Dict[str, object]:
     """Export bars to flat parquet and/or NautilusTrader ParquetDataCatalog."""
     run_migrations()
     settings = get_settings()
@@ -24,22 +41,30 @@ def export_catalog(*, adjust_type: str = "front", fmt: str = "flat") -> Dict[str
         catalog_dir.mkdir(parents=True, exist_ok=True)
 
         with db_session() as conn:
-            df = load_bars_df(conn, adjust_type=adjust_type)
-        if df.empty:
+            export_codes = list(codes) if codes else list_bar_codes(conn, adjust_type=adjust_type)
+
+        if not export_codes:
             out["flat"] = {"exported": 0, "catalog_dir": str(catalog_dir)}
         else:
             exported = 0
             meta: Dict[str, object] = {"adjust_type": adjust_type, "instruments": []}
-            for code, group in df.groupby("code"):
-                frame = group.sort_values("date").copy()
-                path = catalog_dir / f"{code.replace('.', '_')}_{adjust_type}.parquet"
-                try:
-                    frame.to_parquet(path, index=False)
-                except ImportError:
-                    path = catalog_dir / f"{code.replace('.', '_')}_{adjust_type}.csv"
-                    frame.to_csv(path, index=False)
+            total = len(export_codes)
+            for idx, code in enumerate(export_codes, start=1):
+                if job_id and idx % 25 == 0:
+                    report_job_progress(
+                        job_id,
+                        0.96 + 0.03 * (idx / max(total, 1)),
+                        f"导出验策略文件 {idx}/{total}…",
+                    )
+                with db_session() as conn:
+                    frame = load_bars_df(conn, codes=[code], adjust_type=adjust_type)
+                if frame.empty:
+                    continue
+                frame = frame.sort_values("date")
+                path_base = catalog_dir / code.replace(".", "_")
+                filename = _write_code_frame(frame, path_base, adjust_type)
                 exported += 1
-                meta["instruments"].append({"code": code, "rows": len(frame), "file": path.name})
+                meta["instruments"].append({"code": code, "rows": len(frame), "file": filename})
 
             meta_path = catalog_dir / "catalog_meta.json"
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -48,7 +73,7 @@ def export_catalog(*, adjust_type: str = "front", fmt: str = "flat") -> Dict[str
     if fmt in ("nt", "both") or settings.export_nt_catalog:
         from qmt_quant.core.catalog.nt_export import export_nt_catalog
 
-        out["nt"] = export_nt_catalog(adjust_type=adjust_type)
+        out["nt"] = export_nt_catalog(adjust_type=adjust_type, codes=codes)
 
     if fmt == "flat" and "flat" in out:
         return out["flat"]  # type: ignore[return-value]

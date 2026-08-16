@@ -50,6 +50,7 @@ def sync_bars(
     *,
     sector: str = "沪深A股",
     start_date: Optional[str] = None,
+    range_preset: Optional[str] = None,
     adjust_type: str = "front",
     incremental: bool = False,
     incremental_days: Optional[int] = None,
@@ -89,12 +90,22 @@ def sync_bars(
                 f"续传同步（已完成 {processed_base}/{total_codes}）",
             )
     else:
-        if incremental or mode == "incremental":
+        # Full-sync signals (incremental=False + start/range, or mode=full) must win over
+        # the default mode="incremental", otherwise web/API full jobs run as ~5-day incremental.
+        if incremental:
             start, end = (date.today() - timedelta(days=days)).isoformat(), date.today().isoformat()
             effective_mode: SyncMode = "incremental"
-        elif start_date:
-            start, end = start_date, date.today().isoformat()
+        elif start_date or range_preset or mode == "full":
+            if start_date:
+                start, end = start_date, date.today().isoformat()
+            elif range_preset:
+                start, end = resolve_range_preset(range_preset)
+            else:
+                start, end = resolve_range_preset("5y")
             effective_mode = "full"
+        elif mode == "incremental":
+            start, end = (date.today() - timedelta(days=days)).isoformat(), date.today().isoformat()
+            effective_mode = "incremental"
         else:
             start, end = resolve_range_preset("5y")
             effective_mode = "full"
@@ -175,13 +186,19 @@ def sync_bars(
         "bars_written": written,
         "resumed_from": processed_base if resume_checkpoint else 0,
     }
+    if range_preset:
+        result["range_preset"] = range_preset
 
     if settings.auto_export_catalog:
         if job_id:
             report_job_progress(job_id, 0.96, "导出验策略文件…")
         from qmt_quant.core.catalog.export import export_catalog
 
-        result["catalog"] = export_catalog(adjust_type=adjust_type)
+        result["catalog"] = export_catalog(
+            adjust_type=adjust_type,
+            codes=codes if effective_mode == "incremental" else None,
+            job_id=job_id,
+        )
 
     do_repair = settings.sync_auto_repair if auto_repair is None else auto_repair
     if do_repair and effective_mode == "incremental":

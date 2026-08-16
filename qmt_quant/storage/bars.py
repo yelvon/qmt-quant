@@ -77,6 +77,14 @@ def load_bars_df(
     return pd.read_sql_query(sql, conn, params=params)
 
 
+def list_bar_codes(conn: DbConnection, adjust_type: str = "front") -> List[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT code FROM daily_bar WHERE adjust_type = %s ORDER BY code",
+        (adjust_type,),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def quality_stats(conn: DbConnection, adjust_type: str = "front") -> Dict[str, object]:
     rows = conn.execute(
         """

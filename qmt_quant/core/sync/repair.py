@@ -243,7 +243,7 @@ def sync_bars_repair(
     if settings.auto_export_catalog:
         from qmt_quant.core.catalog.export import export_catalog
 
-        result["catalog"] = export_catalog(adjust_type=adjust_type)
+        result["catalog"] = export_catalog(adjust_type=adjust_type, codes=codes)
     return result
 
 

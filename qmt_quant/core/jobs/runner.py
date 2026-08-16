@@ -291,7 +291,9 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if job_type == "sync_bars":
         from qmt_quant.core.sync.bars import sync_bars
 
-        return sync_bars(**params)
+        work = dict(params)
+        work.pop("days", None)  # legacy alias from older clients
+        return sync_bars(**work)
     if job_type == "sync_financial":
         from qmt_quant.core.sync.financial import sync_financial
 

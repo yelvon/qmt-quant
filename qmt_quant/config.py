@@ -42,7 +42,7 @@ class Settings:
     sync_completeness_threshold: float = 0.85
     sync_auto_repair: bool = False
     sync_auto_repair_max_codes: int = 200
-    auto_export_catalog: bool = True
+    auto_export_catalog: bool = False
     initial_cash: float = 1_000_000.0
     commission_rate: float = 0.0003
     stamp_tax_rate: float = 0.001
