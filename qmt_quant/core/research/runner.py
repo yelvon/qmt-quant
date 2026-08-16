@@ -36,7 +36,13 @@ def run_research(
     run_migrations()
     settings = get_settings()
     if job_id:
-        report_job_progress(job_id, 0.08, "加载行情数据…")
+        report_job_progress(
+            job_id,
+            0.08,
+            "加载行情数据…",
+            step="load",
+            detail=f"策略 {strategy_id} · 区间 {range_preset}",
+        )
     start, end = resolve_range_preset(range_preset)
     if screen_run_id:
         universe = load_codes_by_run_id(screen_run_id)
@@ -59,21 +65,35 @@ def run_research(
     if prices.empty:
         return {"error": "no_price_data", "message": "请先同步日线数据"}
 
+    n_codes = len(prices.columns)
+    n_days = len(prices.index)
     if job_id:
-        report_job_progress(job_id, 0.35, f"运行策略 {strategy_id}…")
+        report_job_progress(
+            job_id,
+            0.18,
+            f"行情已加载 · {n_codes} 只股票 · {n_days} 个交易日",
+            step="load",
+            detail=f"{start} ~ {end}",
+        )
 
     fees = FEE_PRESETS.get(fee_preset, FEE_PRESETS["default"])["commission_rate"]
 
     if strategy_id == "ma_cross":
-        result = _run_ma_cross_scan(prices, short_preset, long_preset, fees)
+        result = _run_ma_cross_scan(prices, short_preset, long_preset, fees, job_id=job_id)
     elif strategy_id == "buy_hold":
+        if job_id:
+            report_job_progress(job_id, 0.45, "运行买入持有基准…", step="scan")
         result = _run_buy_hold(prices, fees)
     elif strategy_id == "pe_momentum":
+        if job_id:
+            report_job_progress(job_id, 0.45, "运行低估值动量策略…", step="scan")
         result = _run_pe_momentum(prices, fees)
     elif strategy_id == "screening_rebalance":
+        if job_id:
+            report_job_progress(job_id, 0.45, "运行选股池再平衡…", step="scan")
         result = _run_screening_rebalance(prices, fees, screen_run_id)
     else:
-        result = _run_ma_cross_scan(prices, short_preset, long_preset, fees)
+        result = _run_ma_cross_scan(prices, short_preset, long_preset, fees, job_id=job_id)
 
     equity_map = _equity_from_result(result, prices)
     result["quantstats"] = build_quantstats_summary(equity_map)
@@ -86,7 +106,7 @@ def run_research(
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if job_id:
-        report_job_progress(job_id, 0.85, "保存回测结果…")
+        report_job_progress(job_id, 0.88, "保存回测结果…", step="save")
 
     with db_session() as conn:
         run_id = save_backtest_run(
@@ -123,14 +143,24 @@ def _run_ma_cross_scan(
     short_preset: str,
     long_preset: str,
     fees: float,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     combos = ma_param_combos(short_preset, long_preset)
     rows: List[Dict[str, Any]] = []
+    total = len(combos)
 
     try:
         import vectorbt as vbt
 
-        for short_w, long_w in combos:
+        for idx, (short_w, long_w) in enumerate(combos):
+            if job_id and (idx == 0 or idx % 2 == 0 or idx == total - 1):
+                report_job_progress(
+                    job_id,
+                    0.22 + 0.58 * (idx / max(total, 1)),
+                    f"参数扫描 {idx + 1}/{total}",
+                    step="scan",
+                    detail=f"组合 {short_w}/{long_w}",
+                )
             fast = vbt.MA.run(prices, short_w, short_name="fast")
             slow = vbt.MA.run(prices, long_w, short_name="slow")
             entries = fast.ma_crossed_above(slow)
@@ -153,6 +183,15 @@ def _run_ma_cross_scan(
                 }
             )
     except ImportError:
+        for idx, (short_w, long_w) in enumerate(combos):
+            if job_id and (idx == 0 or idx % 3 == 0 or idx == total - 1):
+                report_job_progress(
+                    job_id,
+                    0.22 + 0.58 * (idx / max(total, 1)),
+                    f"参数扫描 {idx + 1}/{total}",
+                    step="scan",
+                    detail=f"组合 {short_w}/{long_w}",
+                )
         rows = _numpy_ma_scan(prices, combos, fees)
 
     rows.sort(key=lambda r: r["total_return_pct"], reverse=True)

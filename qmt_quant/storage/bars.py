@@ -122,6 +122,14 @@ def coverage_stats(conn: DbConnection, adjust_type: str = "front") -> Dict[str, 
     return {"codes": row[0], "rows": row[1], "min_date": row[2], "max_date": row[3]}
 
 
+def distinct_code_count(conn: DbConnection, adjust_type: str = "front") -> int:
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT code) FROM daily_bar WHERE adjust_type = %s",
+        (adjust_type,),
+    ).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
 def market_latest_date(conn: DbConnection, adjust_type: str = "front") -> Optional[str]:
     row = conn.execute(
         "SELECT MAX(date) FROM daily_bar WHERE adjust_type = %s",

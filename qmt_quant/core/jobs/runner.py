@@ -214,7 +214,7 @@ def _execute_job(job_id: str, job_type: str, env: str, params: Dict[str, Any]) -
                     progress_message="已完成",
                     result=result,
                 )
-            if job_type in QMT_JOB_TYPES:
+            if job_type in QMT_JOB_TYPES or job_type == "data_check":
                 from qmt_quant.core.sync.check import clear_data_check_cache
 
                 clear_data_check_cache()
@@ -349,6 +349,16 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.screener.ic import compute_factor_ic
 
         return compute_factor_ic(**params)
+    if job_type == "data_check":
+        from qmt_quant.core.sync.check import run_data_check
+
+        return run_data_check(
+            sector=params.get("sector", "沪深A股"),
+            adjust_type=params.get("adjust_type", "front"),
+            detailed=bool(params.get("detailed", True)),
+            use_cache=False,
+            job_id=params.get("job_id"),
+        )
     raise ValueError(f"Unknown job type: {job_type}")
 
 
@@ -392,13 +402,14 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
         out["research"] = run_research(
             strategy_id=params.get("strategy", "ma_cross"),
             range_preset=params.get("range_preset", "3y"),
+            job_id=job_id,
         )
     except Exception as exc:
         raise RuntimeError(f"[research] {exc}") from exc
     try:
         research_id = out["research"].get("run_id")
         _step(0.8, "validate", "仔细验策略")
-        out["validate"] = run_validation(from_run_id=research_id)
+        out["validate"] = run_validation(from_run_id=research_id, job_id=job_id)
     except Exception as exc:
         raise RuntimeError(f"[validate] {exc}") from exc
     return out
@@ -407,6 +418,20 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
 def fetch_job(job_id: str) -> Optional[Dict[str, Any]]:
     with db_session() as conn:
         return get_job(conn, job_id)
+
+
+def delete_job_by_id(job_id: str) -> Dict[str, Any]:
+    from qmt_quant.core.jobs.cleanup import delete_job
+
+    with db_session() as conn:
+        return delete_job(conn, job_id)
+
+
+def cleanup_old_jobs(keep_last: int = 30) -> Dict[str, Any]:
+    from qmt_quant.core.jobs.cleanup import cleanup_finished_jobs
+
+    with db_session() as conn:
+        return cleanup_finished_jobs(conn, keep_last=keep_last)
 
 
 def list_recent_jobs(limit: int = 20) -> List[Dict[str, Any]]:

@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from qmt_quant.core.catalog.export import load_price_matrix
+from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.screener.dsl import ScreeningRule, rule_from_template
 from qmt_quant.core.screener.rules import apply_rules
 from qmt_quant.core.screener.templates import TEMPLATES
@@ -40,6 +41,14 @@ def run_screening(
     top_n = rule.top_n or top_n
     as_of = rule.as_of or date.today().isoformat()
 
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.1,
+            "加载股票池与行情…",
+            step="load",
+            detail=f"模板 {template_id} · {sector}",
+        )
     codes = resolve_universe(sector)
     prices = load_price_matrix(codes=codes[:800] if codes else None)
     if prices.empty:
@@ -48,8 +57,18 @@ def run_screening(
     rows: List[Dict[str, Any]] = []
     skipped_no_financial = 0
     skipped_list_days = 0
+    columns = list(prices.columns)
+    total = len(columns)
     with db_session() as conn:
-        for code in prices.columns:
+        for i, code in enumerate(columns):
+            if job_id and (i == 0 or i % 50 == 0 or i == total - 1):
+                report_job_progress(
+                    job_id,
+                    0.15 + 0.55 * (i / max(total, 1)),
+                    f"扫描股票 {i + 1}/{total}",
+                    step="scan",
+                    detail=f"PE≤{pe_limit} · ROE≥{roe_limit}",
+                )
             name_row = conn.execute(
                 "SELECT name, is_st, list_date FROM instrument WHERE code=%s", (code,)
             ).fetchone()
@@ -96,6 +115,8 @@ def run_screening(
     try:
         import polars as pl
 
+        if job_id:
+            report_job_progress(job_id, 0.78, f"排序并选取 Top {top_n}…", step="rank")
         df = pl.DataFrame(rows)
         selected_df = apply_rules(
             df,
@@ -115,6 +136,8 @@ def run_screening(
 
     run_id = uuid.uuid4().hex[:12]
     reason = rule.name or template.name
+    if job_id:
+        report_job_progress(job_id, 0.92, "写入选股结果…", step="rank", detail=f"入选 {len(selected)} 只")
     with db_session() as conn:
         for i, row in enumerate(selected, start=1):
             conn.execute(

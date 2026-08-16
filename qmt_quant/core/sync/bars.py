@@ -88,6 +88,8 @@ def sync_bars(
                 job_id,
                 0.05 + 0.90 * (processed_base / max(total_codes, 1)),
                 f"续传同步（已完成 {processed_base}/{total_codes}）",
+                step="sync",
+                detail=f"{start} ~ {end}",
             )
     else:
         # Full-sync signals (incremental=False + start/range, or mode=full) must win over
@@ -111,7 +113,13 @@ def sync_bars(
             effective_mode = "full"
 
         if job_id:
-            report_job_progress(job_id, 0.06, "正在获取股票列表…")
+            report_job_progress(
+                job_id,
+                0.06,
+                "正在获取股票列表…",
+                step="prepare",
+                detail=f"{sector} · {effective_mode}",
+            )
         if job_id and is_job_cancelled(job_id):
             from qmt_quant.core.jobs.context import JobCancelled
 
@@ -143,6 +151,8 @@ def sync_bars(
                     prefix=f"{mode_label}同步 {start} ~ {end}",
                     progress=0.08,
                 ),
+                step="sync",
+                detail=f"共 {total_codes} 只股票 · 复权 {adjust_type}",
             )
         with db_session() as conn:
             record_universe_count(conn, sector, total_codes)
@@ -191,7 +201,7 @@ def sync_bars(
 
     if settings.auto_export_catalog:
         if job_id:
-            report_job_progress(job_id, 0.96, "导出验策略文件…")
+            report_job_progress(job_id, 0.96, "导出验策略文件…", step="export")
         from qmt_quant.core.catalog.export import export_catalog
 
         result["catalog"] = export_catalog(

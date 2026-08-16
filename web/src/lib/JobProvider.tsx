@@ -1,7 +1,8 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { apiGet } from "./api";
-import { inferJobTypeFromMessage, jobTypeLabel } from "./jobTypes";
+import { inferJobTypeFromMessage, jobRouteForType, jobTypeLabel } from "./jobTypes";
+import { formatEtaSeconds } from "./jobProgressUi";
 
 export type JobState = {
   jobId: string;
@@ -9,6 +10,8 @@ export type JobState = {
   progress: number;
   status: string;
   message: string;
+  detail: string;
+  step: string;
   error: string | null;
   canResume: boolean;
   cancelling: boolean;
@@ -31,6 +34,8 @@ const EMPTY_STATE: JobState = {
   progress: 0,
   status: "",
   message: "",
+  detail: "",
+  step: "",
   error: null,
   canResume: false,
   cancelling: false,
@@ -63,6 +68,8 @@ function applyJobPayload(
     progress: Number(data.progress ?? prev.progress ?? 0),
     status,
     message: String(data.message || data.progress_message || prev.message || ""),
+    detail: String(data.detail ?? prev.detail ?? ""),
+    step: String(data.step ?? prev.step ?? ""),
     error: data.error ? String(data.error) : status === "failed" ? prev.error : null,
     canResume: status === "cancelled" && !!checkpoint,
     cancelling: status === "cancelled" ? false : cancelling,
@@ -85,6 +92,8 @@ function stateFromApiJob(job: Record<string, unknown>): JobState {
     progress: Number(job.progress ?? 0.05),
     status,
     message,
+    detail: "",
+    step: "",
     error: job.error_message ? String(job.error_message) : null,
     canResume: status === "cancelled" && !!result?.checkpoint,
     cancelling: Boolean(job.cancel_requested),
@@ -114,6 +123,8 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
         progress: 0.05,
         status: "running",
         message,
+        detail: "",
+        step: "",
         error: null,
         canResume: false,
         cancelling: false,
@@ -264,20 +275,29 @@ export function GlobalJobBanner() {
 
   const pct = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);
   const typeLabel = jobTypeLabel(job.jobType || inferJobTypeFromMessage(job.message));
-  const dataRoute =
-    job.jobType === "sync_financial" || job.jobType === "sync_bars" ? "/data" : "/";
+  const dataRoute = jobRouteForType(job.jobType || inferJobTypeFromMessage(job.message));
+  const etaLabel = formatEtaSeconds(job.etaSeconds);
 
   return (
     <div className="border-b border-emerald-900/40 bg-emerald-950/40 px-6 py-2">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 text-sm">
-        <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
-          {typeLabel}进行中
-        </Link>
-        <span className="min-w-0 flex-1 truncate text-slate-300">{job.message || "运行中…"}</span>
-        <span className="shrink-0 text-slate-400">{pct}%</span>
-        <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
-          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+      <div className="mx-auto max-w-6xl space-y-1">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
+            {typeLabel}进行中
+          </Link>
+          <span className="min-w-0 flex-1 truncate text-slate-300">{job.message || "运行中…"}</span>
+          <span className="shrink-0 text-slate-400">{pct}%</span>
+          <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
         </div>
+        {(job.detail || etaLabel) && (
+          <p className="truncate pl-0 text-xs text-slate-500">
+            {job.detail}
+            {job.detail && etaLabel ? " · " : ""}
+            {etaLabel ? `预计剩余 ${etaLabel}` : ""}
+          </p>
+        )}
       </div>
     </div>
   );

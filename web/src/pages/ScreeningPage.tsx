@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiGet, apiPost, useJobProgress } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
+import { fetchJobRecord, resultFromJobRecord } from "../lib/jobResult";
+import { isScreeningJob } from "../lib/jobTypes";
+import { useJobTracker } from "../lib/useJobTracker";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
@@ -13,6 +16,9 @@ const RULE_PRESETS = [
 
 export default function ScreeningPage() {
   const nav = useNavigate();
+  const job = useJobTracker();
+  const screenActive = Boolean(job.jobId) && isScreeningJob(job.jobType);
+
   const [template, setTemplate] = useState("low_pe");
   const [sector, setSector] = useState("沪深A股");
   const [peMax, setPeMax] = useState(30);
@@ -22,10 +28,6 @@ export default function ScreeningPage() {
   const [rulePath, setRulePath] = useState("");
   const [templates, setTemplates] = useState<{ id: string; label: string }[]>([]);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
-  const [jobId, setJobId] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("");
-  const [jobError, setJobError] = useState<string | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [runId, setRunId] = useState("");
 
@@ -34,22 +36,24 @@ export default function ScreeningPage() {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
   }, []);
 
-  const onJob = useCallback(
-    (data: Record<string, unknown>) => {
-      if (data.job_id !== jobId) return;
-      setProgress(Number(data.progress || 0));
-      setStatus(String(data.status || ""));
-      if (data.error) setJobError(String(data.error));
-      if (data.status === "completed" && data.result) {
-        setJobError(null);
-        const r = data.result as any;
-        setResults(r.results || []);
-        setRunId(r.run_id || "");
+  useEffect(() => {
+    if (!screenActive || !job.jobId || job.status !== "completed") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const record = await fetchJobRecord(job.jobId);
+        const payload = resultFromJobRecord(record);
+        if (!payload || cancelled) return;
+        setResults((payload.results as any[]) || []);
+        setRunId(String(payload.run_id || ""));
+      } catch {
+        /* ignore */
       }
-    },
-    [jobId]
-  );
-  useJobProgress(onJob);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [screenActive, job.jobId, job.status]);
 
   async function runScreen() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/screen", {
@@ -61,26 +65,28 @@ export default function ScreeningPage() {
       roe_min: roeMin,
       rule_path: rulePath || undefined,
     });
-    setJobId(res.job_id);
     setResults([]);
     setRunId("");
+    job.trackJob(res.job_id, "选股任务运行中…", "screen");
   }
 
   async function sendToResearch() {
     if (!runId) return;
-    await apiPost("/api/jobs/research", {
+    const res = await apiPost<{ job_id: string }>("/api/jobs/research", {
       strategy: "screening_rebalance",
       screen_run_id: runId,
     });
+    job.trackJob(res.job_id, "选股池试策略中…", "research");
     nav("/research");
   }
 
   async function sendToValidation() {
     if (!runId) return;
-    await apiPost("/api/jobs/validate", {
+    const res = await apiPost<{ job_id: string }>("/api/jobs/validate", {
       strategy: "screening_rebalance",
       screen_run_id: runId,
     });
+    job.trackJob(res.job_id, "选股池验策略中…", "validate");
     nav("/validation");
   }
 
@@ -134,19 +140,30 @@ export default function ScreeningPage() {
           />
         </div>
       </details>
-      <button className="btn-primary mt-4" onClick={runScreen}>
+      <button className="btn-primary mt-4" disabled={job.isRunning} onClick={runScreen}>
         开始选股
       </button>
-      {jobId && <JobProgressBar progress={progress} status={status} error={jobError} />}
-      {!results.length && !jobId && (
+      {screenActive && (
+        <JobProgressBar
+          progress={job.progress}
+          status={job.status}
+          message={job.message}
+          error={job.error}
+          jobType={job.jobType}
+          step={job.step}
+          detail={job.detail}
+          etaSeconds={job.etaSeconds}
+        />
+      )}
+      {!results.length && !screenActive && (
         <EmptyState title="还没有选股结果" description="选择模板与条件后点击「开始选股」。" />
       )}
       {runId && (
         <div className="mt-4 flex gap-2">
-          <button className="btn-secondary" onClick={sendToResearch}>
+          <button className="btn-secondary" disabled={job.isRunning} onClick={sendToResearch}>
             送到快速试策略
           </button>
-          <button className="btn-secondary" onClick={sendToValidation}>
+          <button className="btn-secondary" disabled={job.isRunning} onClick={sendToValidation}>
             送到仔细验策略
           </button>
         </div>

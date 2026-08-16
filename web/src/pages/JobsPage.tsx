@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import React, { useEffect, useState } from "react";
+import { apiDelete, apiGet, apiPost } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import StatusBadge from "../components/StatusBadge";
 import TechnicalDetails from "../components/TechnicalDetails";
@@ -15,10 +15,14 @@ function resultSummary(job: any): string {
   return "";
 }
 
+const ACTIVE_STATUSES = new Set(["running", "pending"]);
+
 export default function JobsPage() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
 
   const load = () => apiGet<any[]>("/api/jobs?limit=50").then(setJobs);
   useEffect(() => {
@@ -40,9 +44,50 @@ export default function JobsPage() {
     }
   }
 
+  async function remove(jobId: string, displayName: string) {
+    if (!window.confirm(`确定删除任务「${displayName}」及其报告/回测产物？\n（不会删除已同步的行情数据）`)) {
+      return;
+    }
+    setDeleting(jobId);
+    try {
+      await apiDelete(`/api/jobs/${jobId}`);
+      if (expanded === jobId) setExpanded(null);
+      await load();
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  async function cleanupFinished() {
+    if (
+      !window.confirm(
+        "将删除除最近 30 条以外的所有已完成/失败/已取消任务，并清理关联报告与回测记录。\n行情数据不会被删除。",
+      )
+    ) {
+      return;
+    }
+    setCleaning(true);
+    try {
+      await apiPost("/api/jobs/cleanup", { keep_last: 30 });
+      await load();
+    } finally {
+      setCleaning(false);
+    }
+  }
+
   return (
     <div>
-      <PageCallout>任务记录：人话任务名与状态，便于追溯同步、回测与选股。</PageCallout>
+      <PageCallout>任务记录：人话任务名与状态，便于追溯同步、回测与选股。删除任务时会一并清理报告与回测/选股产物，不删除行情库。</PageCallout>
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+          disabled={cleaning}
+          onClick={cleanupFinished}
+        >
+          {cleaning ? "清理中…" : "清理旧任务（保留最近 30 条）"}
+        </button>
+      </div>
       <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-slate-400">
@@ -91,6 +136,16 @@ export default function JobsPage() {
                         onClick={() => retry(j.id)}
                       >
                         续传
+                      </button>
+                    )}
+                    {!ACTIVE_STATUSES.has(j.status) && (
+                      <button
+                        type="button"
+                        className="text-xs text-red-400 hover:underline"
+                        disabled={deleting === j.id}
+                        onClick={() => remove(j.id, j.display_name)}
+                      >
+                        删除
                       </button>
                     )}
                   </td>

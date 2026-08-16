@@ -10,7 +10,7 @@ from qmt_quant.config import get_settings
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.sync.calendar import list_trade_dates_between
 from qmt_quant.core.sync.universe import load_watchlist
-from qmt_quant.storage.bars import bar_counts_by_code, index_bar_dates, latest_bar_dates, market_latest_date
+from qmt_quant.storage.bars import bar_counts_by_code, latest_bar_dates, market_latest_date
 from qmt_quant.storage.database import db_session
 
 
@@ -76,14 +76,33 @@ def _missing_market_dates(
     trade_dates: List[str],
     adjust_type: str,
     lookback_days: int = 30,
+    universe_total: int = 0,
 ) -> List[str]:
+    """Days in the lookback window with abnormally low cross-section coverage."""
     if not trade_dates:
         return []
     window = trade_dates[-lookback_days:] if len(trade_dates) > lookback_days else trade_dates
     if not window:
         return []
-    have = set(index_bar_dates(conn, start=window[0], end=window[-1], adjust_type=adjust_type))
-    return [d for d in window if d not in have]
+
+    rows = conn.execute(
+        """
+        SELECT date, COUNT(DISTINCT code) AS cnt
+        FROM daily_bar
+        WHERE adjust_type = %s AND date >= %s AND date <= %s
+        GROUP BY date
+        """,
+        (adjust_type, window[0], window[-1]),
+    ).fetchall()
+    if not rows:
+        return list(window)
+
+    counts = {str(r[0]): int(r[1]) for r in rows}
+    peak = max(counts.values())
+    threshold = max(100, int(peak * 0.5))
+    if universe_total > 0:
+        threshold = max(threshold, int(universe_total * 0.5))
+    return [d for d in window if counts.get(d, 0) < threshold]
 
 
 def scan_stale_codes(
@@ -107,31 +126,50 @@ def scan_stale_codes(
     if not trade_dates:
         trade_dates = [market_latest]
 
-    latest_map = latest_bar_dates(conn, adjust_type)
-    inst_rows = conn.execute(
-        "SELECT code, delist_date FROM instrument ORDER BY code"
-    ).fetchall()
-    if not inst_rows:
-        inst_rows = [(c, None) for c in latest_map]
+    if len(trade_dates) > stale_days:
+        stale_before = trade_dates[-(stale_days + 1)]
+    else:
+        stale_before = trade_dates[0]
 
-    stale: List[Tuple[str, int]] = []
     today = date.today().isoformat()
-    for row in inst_rows:
-        code = row[0]
-        delist = row[1]
-        if delist and str(delist)[:10] < today:
-            continue
-        latest = latest_map.get(code)
-        if not latest:
-            stale.append((code, 9999))
-            continue
-        lag = _trading_day_lag(latest, market_latest, trade_dates)
-        if lag > stale_days:
-            stale.append((code, lag))
+    count_row = conn.execute(
+        """
+        WITH latest AS (
+            SELECT code, MAX(date) AS latest
+            FROM daily_bar
+            WHERE adjust_type = %s
+            GROUP BY code
+        )
+        SELECT COUNT(*)
+        FROM instrument i
+        LEFT JOIN latest l ON l.code = i.code
+        WHERE (i.delist_date IS NULL OR i.delist_date >= %s)
+          AND (l.latest IS NULL OR l.latest < %s)
+        """,
+        (adjust_type, today, stale_before),
+    ).fetchone()
+    stale_total = int(count_row[0] or 0) if count_row else 0
 
-    stale.sort(key=lambda x: -x[1])
-    codes = [c for c, _ in stale[:max_codes]]
-    return codes, market_latest, len(stale)
+    rows = conn.execute(
+        """
+        WITH latest AS (
+            SELECT code, MAX(date) AS latest
+            FROM daily_bar
+            WHERE adjust_type = %s
+            GROUP BY code
+        )
+        SELECT i.code, COALESCE(l.latest, '0000-01-01') AS latest
+        FROM instrument i
+        LEFT JOIN latest l ON l.code = i.code
+        WHERE (i.delist_date IS NULL OR i.delist_date >= %s)
+          AND (l.latest IS NULL OR l.latest < %s)
+        ORDER BY latest ASC, i.code ASC
+        LIMIT %s
+        """,
+        (adjust_type, today, stale_before, max_codes),
+    ).fetchall()
+    codes = [r[0] for r in rows]
+    return codes, market_latest, stale_total
 
 
 def build_repair_plan(
@@ -217,10 +255,18 @@ def analyze_gaps(
     detailed: bool = False,
     as_of_date: Optional[str] = None,
     include_repair_plan: bool = False,
+    job_id: Optional[str] = None,
 ) -> Dict[str, object]:
+    from qmt_quant.core.jobs.context import report_job_progress
+
+    def _progress(progress: float, message: str, step: str) -> None:
+        if job_id:
+            report_job_progress(job_id, progress, message, step=step, step_label=message)
+
     settings = get_settings()
     as_of = as_of_date or date.today().isoformat()
     lookback_preset = settings.sync_gap_scan_lookback
+    _progress(0.12, "读取交易日历与行情范围…", "prepare")
     with db_session() as conn:
         market_latest = market_latest_date(conn, adjust_type)
         range_start, range_end = resolve_range_preset(lookback_preset, max_date=market_latest or as_of)
@@ -228,16 +274,22 @@ def analyze_gaps(
         if not trade_dates and market_latest:
             trade_dates = [market_latest]
 
+        _progress(0.22, "统计股票覆盖…", "coverage")
+        from qmt_quant.storage.bars import distinct_code_count
+
+        bar_codes = distinct_code_count(conn, adjust_type)
+
+        _progress(0.32, "扫描滞后个股（较慢，请稍候）…", "stale")
         stale_codes, _, stale_total = scan_stale_codes(conn, sector=sector, adjust_type=adjust_type)
-        missing_market = _missing_market_dates(conn, trade_dates, adjust_type)
 
-        latest_map = latest_bar_dates(conn, adjust_type)
-        bar_codes = len(latest_map)
-
+        _progress(0.58, "检查市场缺日与新鲜度…", "market")
         from qmt_quant.core.sync.universe_stats import resolve_universe_total
 
         universe_total, universe_estimated = resolve_universe_total(
             conn, sector, bar_codes=bar_codes
+        )
+        missing_market = _missing_market_dates(
+            conn, trade_dates, adjust_type, universe_total=universe_total
         )
         if universe_estimated:
             coverage_pct = 0.0
@@ -252,16 +304,20 @@ def analyze_gaps(
                 lag_days = _trading_day_lag(market_latest, ref, trade_dates)
 
         stale_pct = round((stale_total / universe_total * 100), 2) if universe_total else 0.0
-        completeness_median = 0.0
+        completeness_median = 1.0
+        completeness_skipped = True
         if detailed and stale_codes:
-            sample = stale_codes[:50] + [c for c in load_watchlist() if c in latest_map][:20]
+            _progress(0.66, "抽样计算区间完整度…", "completeness")
+            sample = stale_codes[:50] + [c for c in load_watchlist()][:20]
             sample = list(dict.fromkeys(sample))
             completeness_median = _median_completeness(
                 conn, sample, range_start, range_end or as_of, adjust_type, trade_dates
             )
+            completeness_skipped = False
 
         repair_plan: Optional[Dict[str, object]] = None
         if include_repair_plan:
+            _progress(0.72, "生成修复计划…", "repair")
             repair_plan = build_repair_plan(
                 sector=sector,
                 adjust_type=adjust_type,
@@ -275,7 +331,7 @@ def analyze_gaps(
             lag_days > 1
             or stale_pct >= 5.0
             or missing_market
-            or (detailed and completeness_median < settings.sync_completeness_threshold)
+            or (detailed and not completeness_skipped and completeness_median < settings.sync_completeness_threshold)
         )
 
         return {
@@ -296,6 +352,7 @@ def analyze_gaps(
                 "stale_pct": stale_pct,
                 "missing_market_dates": missing_market[:20],
                 "completeness_median": completeness_median,
+                "completeness_skipped": completeness_skipped,
             },
             "repair_plan": repair_plan,
             "needs_repair": needs_repair,

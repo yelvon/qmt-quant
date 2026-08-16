@@ -42,7 +42,7 @@ export default function DashboardPage() {
     setPipelineError(null);
     try {
       const res = await apiPost<{ job_id: string }>("/api/jobs/pipeline");
-      job.trackJob(res.job_id, "一键跑通：更新数据");
+      job.trackJob(res.job_id, "一键跑通：更新数据", "pipeline");
       setStep("sync");
       setStepLabel("更新数据");
     } catch (err) {
@@ -94,6 +94,10 @@ export default function DashboardPage() {
               status={job.status}
               message={job.message}
               error={job.error}
+              jobType={job.jobType}
+              step={job.step}
+              detail={job.detail}
+              etaSeconds={job.etaSeconds}
               onCancel={job.isRunning ? () => job.cancelJob() : undefined}
               completeAction={
                 job.status === "completed"

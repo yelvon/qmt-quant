@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { apiGet, apiPost, useJobProgress } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
+import { fetchJobRecord, resultFromJobRecord } from "../lib/jobResult";
+import { isValidationJob } from "../lib/jobTypes";
+import { useJobTracker } from "../lib/useJobTracker";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
@@ -11,37 +14,45 @@ import TechnicalDetails from "../components/TechnicalDetails";
 
 export default function ValidationPage() {
   const [params] = useSearchParams();
+  const job = useJobTracker();
+  const validateActive = Boolean(job.jobId) && isValidationJob(job.jobType);
+
   const [fromRun, setFromRun] = useState(params.get("from") || "");
   const [runs, setRuns] = useState<{ id: string; label: string }[]>([]);
   const [match, setMatch] = useState("next_open");
-  const [jobId, setJobId] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("");
-  const [jobError, setJobError] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
 
   useEffect(() => {
     apiGet<any[]>("/api/options/research-runs").then(setRuns);
   }, []);
 
-  const onJob = useCallback(
-    async (data: Record<string, unknown>) => {
-      if (data.job_id !== jobId) return;
-      setProgress(Number(data.progress || 0));
-      setStatus(String(data.status || ""));
-      if (data.error) setJobError(String(data.error));
-      if (data.status === "completed" && data.result) {
-        setJobError(null);
-        const r = data.result as any;
-        if (r.run_id) {
-          const v = await apiGet<any>(`/api/validate/${r.run_id}`);
-          setDetail(v.detail);
-        } else setDetail(data.result);
+  async function applyValidationResult(payload: Record<string, unknown>) {
+    const id = String(payload.run_id || "");
+    if (id) {
+      const v = await apiGet<any>(`/api/validate/${id}`);
+      setDetail(v.detail);
+      return;
+    }
+    setDetail(payload);
+  }
+
+  useEffect(() => {
+    if (!validateActive || !job.jobId || job.status !== "completed") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const record = await fetchJobRecord(job.jobId);
+        const payload = resultFromJobRecord(record);
+        if (!payload || cancelled) return;
+        await applyValidationResult(payload);
+      } catch {
+        /* ignore */
       }
-    },
-    [jobId]
-  );
-  useJobProgress(onJob);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [validateActive, job.jobId, job.status]);
 
   async function runValidate() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/validate", {
@@ -49,9 +60,8 @@ export default function ValidationPage() {
       match,
       benchmark: "hs300",
     });
-    setJobId(res.job_id);
     setDetail(null);
-    setJobError(null);
+    job.trackJob(res.job_id, "仔细验策略运行中…", "validate");
   }
 
   const qs = detail?.quantstats;
@@ -76,22 +86,27 @@ export default function ValidationPage() {
           onChange={setMatch}
         />
       </div>
-      <button className="btn-primary mt-4" onClick={runValidate}>
+      <button className="btn-primary mt-4" disabled={job.isRunning} onClick={runValidate}>
         开始验证
       </button>
-      {jobId && (
+      {validateActive && (
         <JobProgressBar
-          progress={progress}
-          status={status}
-          error={jobError}
+          progress={job.progress}
+          status={job.status}
+          message={job.message}
+          error={job.error}
+          jobType={job.jobType}
+          step={job.step}
+          detail={job.detail}
+          etaSeconds={job.etaSeconds}
           completeAction={
-            status === "completed" && detail?.verdict === "可以采用"
+            job.status === "completed" && detail?.verdict === "可以采用"
               ? { label: "去模拟下单", to: "/live" }
               : undefined
           }
         />
       )}
-      {!detail && !jobId && (
+      {!detail && !validateActive && (
         <EmptyState
           title="还没有验证结果"
           description="请先从③快速试策略，再送到本页验证；或选择已有研究记录。"

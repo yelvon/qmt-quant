@@ -162,7 +162,7 @@ def _fetch_and_upsert(
             )
         return local_written
 
-    if job_id:
+    if job_id and not on_batch_done:
         report_job_progress(
             job_id,
             _sync_progress(0.05, processed_base, total),
@@ -190,6 +190,7 @@ def sync_bars_repair(
     *,
     sector: Optional[str] = None,
     job_id: Optional[str] = None,
+    on_batch_done: Optional[Callable[[int, int], None]] = None,
 ) -> Dict[str, object]:
     run_migrations()
     settings = get_settings()
@@ -220,6 +221,7 @@ def sync_bars_repair(
             job_id=job_id,
             sector=sector_name,
             mode="repair",
+            on_batch_done=on_batch_done,
         )
 
     with db_session() as conn:
@@ -255,6 +257,15 @@ def run_check_and_repair(
     codes: Optional[Sequence[str]] = None,
     job_id: Optional[str] = None,
 ) -> Dict[str, object]:
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.05,
+            "分析数据缺口…",
+            step="check",
+            step_label="检测缺口",
+        )
+
     check = analyze_gaps(
         sector=sector,
         adjust_type=adjust_type,
@@ -262,20 +273,65 @@ def run_check_and_repair(
         include_repair_plan=True,
     )
     if not check.get("needs_repair") and not codes:
+        if job_id:
+            report_job_progress(job_id, 1.0, "数据正常，无需修复", step="check", step_label="检测缺口")
         return {"check": check, "repair": {"skipped": True, "reason": "no repair needed"}}
 
     if codes:
         plan = build_repair_plan(sector=sector, adjust_type=adjust_type, codes=list(codes))
     else:
         plan = RepairPlan.from_dict(check.get("repair_plan") or {})
-    repair = sync_bars_repair(plan, sector=sector, job_id=job_id)
+
+    code_count = len(plan.codes or [])
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.12,
+            f"准备修复 {code_count} 只股票…" if code_count else "准备修复…",
+            step="repair",
+            step_label="补数修复",
+        )
+
+    def _repair_progress(processed: int, total: int) -> None:
+        if not job_id or total <= 0:
+            return
+        progress = 0.12 + 0.76 * (processed / total)
+        report_job_progress(
+            job_id,
+            progress,
+            sync_progress_message(
+                processed,
+                total,
+                job_id=job_id,
+                prefix="修复中",
+                progress=progress,
+            ),
+            step="repair",
+            step_label="补数修复",
+            detail=f"{processed}/{total} 只",
+        )
+
+    repair = sync_bars_repair(
+        plan,
+        sector=sector,
+        job_id=job_id,
+        on_batch_done=_repair_progress if job_id else None,
+    )
     from qmt_quant.core.sync.check import clear_data_check_cache
 
     clear_data_check_cache()
+
+    if job_id:
+        report_job_progress(job_id, 0.90, "复检数据状态…", step="verify", step_label="复检")
+
     post_check = analyze_gaps(
         sector=sector,
         adjust_type=adjust_type,
         detailed=detailed,
         include_repair_plan=False,
     )
+
+    if job_id:
+        report_job_progress(job_id, 0.98, "修复完成", step="save", step_label="完成")
+
     return {"check": check, "repair": repair, "post_check": post_check}

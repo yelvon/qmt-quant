@@ -1,5 +1,8 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost, useJobProgress } from "../lib/api";
+import React, { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../lib/api";
+import { fetchJobRecord, resultFromJobRecord } from "../lib/jobResult";
+import { isIcJob } from "../lib/jobTypes";
+import { useJobTracker } from "../lib/useJobTracker";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
@@ -7,14 +10,13 @@ import TechnicalDetails from "../components/TechnicalDetails";
 import EmptyState from "../components/EmptyState";
 
 export default function IcPage() {
+  const job = useJobTracker();
+  const icActive = Boolean(job.jobId) && isIcJob(job.jobType);
+
   const [template, setTemplate] = useState("low_pe");
   const [sector, setSector] = useState("沪深A股");
   const [templates, setTemplates] = useState<{ id: string; label: string }[]>([]);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
-  const [jobId, setJobId] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("");
-  const [jobError, setJobError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
 
   useEffect(() => {
@@ -22,29 +24,31 @@ export default function IcPage() {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
   }, []);
 
-  const onJob = useCallback(
-    (data: Record<string, unknown>) => {
-      if (data.job_id !== jobId) return;
-      setProgress(Number(data.progress || 0));
-      setStatus(String(data.status || ""));
-      if (data.error) setJobError(String(data.error));
-      if (data.status === "completed" && data.result) {
-        setResult(data.result);
-        setJobError(null);
+  useEffect(() => {
+    if (!icActive || !job.jobId || job.status !== "completed") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const record = await fetchJobRecord(job.jobId);
+        const payload = resultFromJobRecord(record);
+        if (!payload || cancelled) return;
+        setResult(payload);
+      } catch {
+        /* ignore */
       }
-    },
-    [jobId]
-  );
-  useJobProgress(onJob);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [icActive, job.jobId, job.status]);
 
   async function runIc() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/screen/ic", {
       template,
       sector,
     });
-    setJobId(res.job_id);
     setResult(null);
-    setJobError(null);
+    job.trackJob(res.job_id, "因子 IC 计算中…", "screen_ic");
   }
 
   const icRows = result?.ic ? Object.entries(result.ic as Record<string, any>) : [];
@@ -58,11 +62,22 @@ export default function IcPage() {
         <PresetSelect label="模板" value={template} options={templates} onChange={setTemplate} />
         <PresetSelect label="范围" value={sector} options={sectors} onChange={setSector} />
       </div>
-      <button className="btn-primary mt-4" onClick={runIc}>
+      <button className="btn-primary mt-4" disabled={job.isRunning} onClick={runIc}>
         计算 IC
       </button>
-      {jobId && <JobProgressBar progress={progress} status={status} error={jobError} />}
-      {!result && !jobId && (
+      {icActive && (
+        <JobProgressBar
+          progress={job.progress}
+          status={job.status}
+          message={job.message}
+          error={job.error}
+          jobType={job.jobType}
+          step={job.step}
+          detail={job.detail}
+          etaSeconds={job.etaSeconds}
+        />
+      )}
+      {!result && !icActive && (
         <EmptyState title="还没有 IC 结果" description="选择模板与范围后点击「计算 IC」。" />
       )}
       {icRows.length > 0 && (

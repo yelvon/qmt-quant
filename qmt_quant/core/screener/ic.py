@@ -11,6 +11,7 @@ import pandas as pd
 
 from qmt_quant.config import ROOT_DIR
 from qmt_quant.core.catalog.export import load_price_matrix
+from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.sync.universe import resolve_universe
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.financial import load_financial_asof
@@ -25,15 +26,26 @@ def compute_factor_ic(
 ) -> Dict[str, Any]:
     run_migrations()
     horizons = horizons or [5, 20]
+    if job_id:
+        report_job_progress(job_id, 0.12, "加载股票池行情…", step="load", detail=f"模板 {template_id}")
     codes = resolve_universe(sector)[:200]
     prices = load_price_matrix(codes=codes)
     if prices.empty:
         return {"error": "no_price_data"}
 
     factor_rows: List[Dict[str, float]] = []
+    columns = list(prices.columns)
+    total = len(columns)
     with db_session() as conn:
         as_of = prices.index[-1].strftime("%Y-%m-%d")
-        for code in prices.columns:
+        for i, code in enumerate(columns):
+            if job_id and (i == 0 or i % 40 == 0 or i == total - 1):
+                report_job_progress(
+                    job_id,
+                    0.2 + 0.45 * (i / max(total, 1)),
+                    f"提取因子 {i + 1}/{total}",
+                    step="factors",
+                )
             fin = load_financial_asof(conn, "Pershareindex", code, as_of) or {}
             pe = fin.get("pe") or fin.get("s_fa_pe")
             if pe is None:
@@ -46,6 +58,8 @@ def compute_factor_ic(
 
     rets = {h: prices.pct_change(h).iloc[-1] for h in horizons}
     ic_results = {}
+    if job_id:
+        report_job_progress(job_id, 0.72, "计算 Spearman IC…", step="ic", detail=f"horizons {horizons}")
     for factor in ("pe_inv", "momentum"):
         values = []
         for row in factor_rows:

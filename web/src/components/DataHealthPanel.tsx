@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import JobProgressBar from "./JobProgressBar";
 import StatusBadge from "./StatusBadge";
 import TechnicalDetails from "./TechnicalDetails";
 
@@ -8,6 +9,17 @@ type Check = {
   ok: boolean;
   coverage?: string;
   detail?: string;
+};
+
+type JobProgress = {
+  progress: number;
+  status: string;
+  message: string;
+  step?: string;
+  detail?: string;
+  etaSeconds?: number | null;
+  error?: string | null;
+  jobType?: string;
 };
 
 type Props = {
@@ -23,36 +35,73 @@ type Props = {
     gap_summary?: { stale_count?: number };
     stale_codes?: string[];
   } | null;
+  lastScan?: { as_of?: string; stale_count?: number; needs_repair?: boolean } | null;
   loading?: boolean;
+  healthJob?: JobProgress | null;
+  repairJob?: JobProgress | null;
+  onCheck?: () => void;
   onRepair?: () => void;
+  onRepairCancel?: () => void;
+  repairCancelling?: boolean;
   repairing?: boolean;
 };
 
-function HealthSkeleton() {
-  return (
-    <div className="animate-pulse space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="h-4 w-48 rounded bg-slate-800" />
-        <div className="h-6 w-20 rounded bg-slate-800" />
-      </div>
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="rounded-lg border border-slate-800 px-3 py-3">
-          <div className="mb-2 h-4 w-28 rounded bg-slate-800" />
-          <div className="h-3 w-56 rounded bg-slate-900" />
-        </div>
-      ))}
-      <p className="text-xs text-slate-500">正在扫描本地数据库…</p>
-    </div>
-  );
-}
+export default function DataHealthPanel({
+  check,
+  lastScan,
+  loading,
+  healthJob,
+  repairJob,
+  onCheck,
+  onRepair,
+  onRepairCancel,
+  repairCancelling,
+  repairing,
+}: Props) {
+  const healthRunning =
+    healthJob && (healthJob.status === "running" || healthJob.status === "pending");
+  const repairRunning =
+    repairJob && (repairJob.status === "running" || repairJob.status === "pending");
 
-export default function DataHealthPanel({ check, loading, onRepair, repairing }: Props) {
+  if (healthRunning) {
+    return (
+      <JobProgressBar
+        heading="数据健康检查"
+        jobType="data_check"
+        progress={healthJob.progress}
+        status={healthJob.status}
+        message={healthJob.message}
+        step={healthJob.step}
+        detail={healthJob.detail}
+        etaSeconds={healthJob.etaSeconds}
+        error={healthJob.error}
+      />
+    );
+  }
+
   if (loading && !check) {
-    return <HealthSkeleton />;
+    return <p className="text-sm text-slate-500">正在提交检查任务…</p>;
   }
 
   if (!check) {
-    return <p className="text-sm text-slate-500">暂无健康数据</p>;
+    return (
+      <div className="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center">
+        <p className="text-sm text-slate-400">
+          数据健康检查会扫描全库覆盖、滞后个股与质量指标，耗时较长。提交后可查看分阶段进度与预计剩余时间。
+        </p>
+        {lastScan?.as_of && (
+          <p className="mt-2 text-xs text-slate-500">
+            上次检查：{lastScan.as_of}
+            {lastScan.stale_count != null ? ` · 滞后 ${lastScan.stale_count} 只` : ""}
+          </p>
+        )}
+        {onCheck && (
+          <button type="button" className="btn-primary mt-4 text-sm" disabled={loading} onClick={onCheck}>
+            {loading ? "提交中…" : "开始检查"}
+          </button>
+        )}
+      </div>
+    );
   }
 
   const items = check.checks || [];
@@ -63,6 +112,24 @@ export default function DataHealthPanel({ check, loading, onRepair, repairing }:
 
   return (
     <div>
+      {repairRunning && (
+        <div className="mb-4">
+          <JobProgressBar
+            heading="数据修复"
+            jobType={repairJob.jobType || "sync_check_repair"}
+            progress={repairJob.progress}
+            status={repairJob.status}
+            message={repairJob.message}
+            step={repairJob.step}
+            detail={repairJob.detail}
+            etaSeconds={repairJob.etaSeconds}
+            error={repairJob.error}
+            onCancel={onRepairCancel}
+            cancelling={repairCancelling}
+          />
+        </div>
+      )}
+
       {(barMin || barMax) && (
         <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
           <p className="text-sm text-slate-200">本地已同步日线范围</p>
@@ -88,14 +155,24 @@ export default function DataHealthPanel({ check, loading, onRepair, repairing }:
           {check.as_of ? ` · 截至 ${check.as_of}` : ""}
         </p>
         <div className="flex items-center gap-2">
-          {check.needs_repair && onRepair && (
+          {onCheck && (
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              disabled={loading || repairing}
+              onClick={onCheck}
+            >
+              {loading ? "提交中…" : "重新检查"}
+            </button>
+          )}
+          {check.needs_repair && onRepair && !repairRunning && (
             <button type="button" className="btn-primary text-xs" disabled={repairing} onClick={onRepair}>
-              {repairing ? "修复中…" : "一键修复"}
+              一键修复
             </button>
           )}
           <StatusBadge
-            ok={coreOk && !check.needs_repair}
-            label={coreOk && !check.needs_repair ? "数据就绪" : "需关注"}
+            ok={coreOk && !check.needs_repair && !repairRunning}
+            label={repairRunning ? "修复中" : coreOk && !check.needs_repair ? "数据就绪" : "需关注"}
           />
         </div>
       </div>
@@ -122,11 +199,6 @@ export default function DataHealthPanel({ check, loading, onRepair, repairing }:
             </div>
           </li>
         ))}
-        {loading && (
-          <li className="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-xs text-slate-500">
-            正在补充区间完整度等详细指标…
-          </li>
-        )}
       </ul>
       <TechnicalDetails data={check} />
     </div>

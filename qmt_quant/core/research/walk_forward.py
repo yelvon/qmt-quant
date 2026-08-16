@@ -10,6 +10,7 @@ import pandas as pd
 
 from qmt_quant.config import ROOT_DIR, get_settings
 from qmt_quant.core.catalog.export import load_price_matrix
+from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import FEE_PRESETS
 from qmt_quant.core.research.runner import _run_ma_cross_scan
@@ -28,6 +29,7 @@ def run_walk_forward(
     test_bars: int = 63,
     step_bars: int | None = None,
     fees: float = 0.0003,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     if prices.empty or len(prices) < train_bars + test_bars:
         return {"error": "insufficient_data", "segments": []}
@@ -36,12 +38,23 @@ def run_walk_forward(
     segments: List[Dict[str, Any]] = []
     idx = 0
     dates = list(prices.index)
+    total_segments = max(1, (len(dates) - train_bars - test_bars) // step + 1)
+    seg_no = 0
 
     while idx + train_bars + test_bars <= len(dates):
         train_end = idx + train_bars
         test_end = train_end + test_bars
         train_slice = prices.iloc[idx:train_end]
         test_slice = prices.iloc[train_end:test_end]
+
+        if job_id:
+            report_job_progress(
+                job_id,
+                0.25 + 0.6 * (seg_no / total_segments),
+                f"Walk-Forward 段 {seg_no + 1}/{total_segments}",
+                step="segment",
+                detail=f"训练 {dates[idx].strftime('%Y-%m-%d')} ~ {dates[train_end - 1].strftime('%Y-%m-%d')}",
+            )
 
         if strategy_id == "ma_cross":
             scan = _run_ma_cross_scan(train_slice, short_preset, long_preset, fees)
@@ -66,6 +79,7 @@ def run_walk_forward(
             }
         )
         idx += step
+        seg_no += 1
 
     positive = sum(1 for s in segments if s["oos_return_pct"] > 0)
     stability = round(positive / len(segments), 3) if segments else 0.0
@@ -103,6 +117,14 @@ def run_walk_forward_study(
     run_migrations()
     settings = get_settings()
     start, end = resolve_range_preset(range_preset)
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.12,
+            "加载 Walk-Forward 数据…",
+            step="load",
+            detail=f"{start} ~ {end} · train {train_bars} / test {test_bars} 根 K 线",
+        )
     universe = resolve_universe(sector)[:50]
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
@@ -123,6 +145,7 @@ def run_walk_forward_study(
         test_bars=test_bars,
         step_bars=step_bars,
         fees=fees,
+        job_id=job_id,
     )
     result["params"] = {
         "sector": sector,
@@ -135,6 +158,9 @@ def run_walk_forward_study(
     reports_dir.mkdir(exist_ok=True)
     result_path = reports_dir / f"walk_forward_{strategy_id}_{range_preset}.json"
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if job_id:
+        report_job_progress(job_id, 0.92, "保存 Walk-Forward 结果…", step="save")
 
     with db_session() as conn:
         run_id = save_backtest_run(

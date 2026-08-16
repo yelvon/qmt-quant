@@ -17,6 +17,8 @@ from qmt_quant.core.data.table_meta import get_table_meta, list_tables
 from qmt_quant.core.doctor import run_doctor
 from qmt_quant.core.jobs.errors import ConcurrentJobError
 from qmt_quant.core.jobs.runner import (
+    cleanup_old_jobs,
+    delete_job_by_id,
     fetch_job,
     list_recent_jobs,
     list_resumable_jobs,
@@ -35,7 +37,7 @@ from qmt_quant.core.research.presets import (
     SHORT_MA_PRESETS,
 )
 from qmt_quant.core.screener.templates import TEMPLATES
-from qmt_quant.core.sync.check import run_data_check
+from qmt_quant.core.sync.check import run_data_check, run_data_summary
 from qmt_quant.core.trade.service import get_trade_status, preview_signal_orders, submit_orders
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, list_jobs
@@ -79,6 +81,12 @@ class SyncRepairBody(BaseModel):
 
 
 class SyncCheckRepairBody(BaseModel):
+    sector: str = "沪深A股"
+    adjust: str = "front"
+    detailed: bool = True
+
+
+class DataCheckBody(BaseModel):
     sector: str = "沪深A股"
     adjust: str = "front"
     detailed: bool = True
@@ -221,23 +229,25 @@ def create_app() -> FastAPI:
     @app.get("/api/status")
     def api_status() -> Dict[str, Any]:
         doctor = run_doctor()
-        check = run_data_check()
+        summary = run_data_summary()
         jobs = list_recent_jobs(5)
-        coverage = float(check.get("bar_coverage_pct", 0) or 0)
+        coverage = float(summary.get("bar_coverage_pct", 0) or 0)
         suggestion = "更新今日数据"
         if coverage > 80:
             suggestion = "快速试策略"
         checks = [c.__dict__ for c in doctor.checks]
+        last_scan = summary.get("last_health_scan") or {}
+        needs_repair = bool(last_scan.get("needs_repair"))
         actions = build_status_actions(
             doctor_ok=doctor.ok,
             checks=checks,
             bar_coverage_pct=coverage,
-            needs_repair=bool(check.get("needs_repair")),
+            needs_repair=needs_repair,
         )
         return {
             "doctor_ok": doctor.ok,
             "checks": checks,
-            "data_check": check,
+            "data_check": summary,
             "recent_jobs": jobs,
             "suggestion": suggestion,
             "actions": actions,
@@ -251,6 +261,18 @@ def create_app() -> FastAPI:
             "ok": doctor.ok,
             "checks": [c.__dict__ for c in doctor.checks],
         }
+
+    @app.get("/api/data/summary")
+    def api_data_summary(
+        sector: str = "沪深A股",
+        adjust: str = "front",
+        refresh: bool = False,
+    ) -> Dict[str, Any]:
+        if refresh:
+            from qmt_quant.core.sync.check import clear_data_check_cache
+
+            clear_data_check_cache()
+        return run_data_summary(sector=sector, adjust_type=adjust, use_cache=not refresh)
 
     @app.get("/api/data/check")
     def api_data_check(
@@ -438,6 +460,20 @@ def create_app() -> FastAPI:
             display_name="检查并修复数据",
             job_type="sync_check_repair",
             env="qmt",
+            params={
+                "sector": body.sector,
+                "adjust_type": body.adjust,
+                "detailed": body.detailed,
+            },
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/data/check")
+    def job_data_check(body: DataCheckBody) -> Dict[str, str]:
+        job_id = submit_job(
+            display_name="数据健康检查",
+            job_type="data_check",
+            env="quant",
             params={
                 "sector": body.sector,
                 "adjust_type": body.adjust,
@@ -641,6 +677,25 @@ def create_app() -> FastAPI:
             params=job.get("params_json") or {},
         )
         return {"job_id": new_id}
+
+    @app.delete("/api/jobs/{job_id}")
+    def api_job_delete(job_id: str) -> Dict[str, Any]:
+        try:
+            return delete_job_by_id(job_id)
+        except ValueError as exc:
+            code = str(exc)
+            if code == "not_found":
+                raise HTTPException(status_code=404, detail="not_found") from exc
+            if code == "job_still_active":
+                raise HTTPException(status_code=400, detail="job_still_active") from exc
+            raise HTTPException(status_code=400, detail=code) from exc
+
+    class JobsCleanupBody(BaseModel):
+        keep_last: int = Field(default=30, ge=0, le=500)
+
+    @app.post("/api/jobs/cleanup")
+    def api_jobs_cleanup(body: JobsCleanupBody) -> Dict[str, Any]:
+        return cleanup_old_jobs(keep_last=body.keep_last)
 
     @app.get("/api/jobs")
     def api_jobs(limit: int = 20) -> List[Dict[str, Any]]:

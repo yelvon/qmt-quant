@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiGet, apiPost, useJobProgress } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
+import { fetchJobRecord, resultFromJobRecord } from "../lib/jobResult";
+import { isResearchJob } from "../lib/jobTypes";
+import { useJobTracker } from "../lib/useJobTracker";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import JobProgressBar from "../components/JobProgressBar";
@@ -9,6 +12,9 @@ import EmptyState from "../components/EmptyState";
 
 export default function ResearchPage() {
   const nav = useNavigate();
+  const job = useJobTracker();
+  const researchActive = Boolean(job.jobId) && isResearchJob(job.jobType);
+
   const [strategy, setStrategy] = useState("ma_cross");
   const [sector, setSector] = useState("沪深A股");
   const [range, setRange] = useState("3y");
@@ -18,10 +24,6 @@ export default function ResearchPage() {
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [ranges, setRanges] = useState<{ id: string; label: string }[]>([]);
   const [ma, setMa] = useState<{ short: any[]; long: any[] }>({ short: [], long: [] });
-  const [jobId, setJobId] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("");
-  const [jobError, setJobError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [runId, setRunId] = useState("");
   const [wfOpen, setWfOpen] = useState(false);
@@ -36,29 +38,35 @@ export default function ResearchPage() {
     apiGet<any>("/api/options/ma-presets").then(setMa);
   }, []);
 
-  const onJob = useCallback(
-    async (data: Record<string, unknown>) => {
-      if (data.job_id !== jobId) return;
-      setProgress(Number(data.progress || 0));
-      setStatus(String(data.status || ""));
-      if (data.error) setJobError(String(data.error));
-      if (data.status === "completed" && data.result) {
-        setJobError(null);
-        const r = data.result as any;
-        if (r.segments) {
-          setWfResult(r);
-          return;
-        }
-        setRunId(r.run_id);
-        if (r.run_id) {
-          const detail = await apiGet<any>(`/api/research/${r.run_id}`);
-          setResult(detail.detail);
-        }
+  async function applyResearchResult(payload: Record<string, unknown>) {
+    if (payload.segments) {
+      setWfResult(payload);
+      return;
+    }
+    const id = String(payload.run_id || "");
+    if (!id) return;
+    setRunId(id);
+    const detail = await apiGet<any>(`/api/research/${id}`);
+    setResult(detail.detail);
+  }
+
+  useEffect(() => {
+    if (!researchActive || !job.jobId || job.status !== "completed") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const record = await fetchJobRecord(job.jobId);
+        const payload = resultFromJobRecord(record);
+        if (!payload || cancelled) return;
+        await applyResearchResult(payload);
+      } catch {
+        /* ignore */
       }
-    },
-    [jobId]
-  );
-  useJobProgress(onJob);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [researchActive, job.jobId, job.status]);
 
   async function runResearch() {
     const res = await apiPost<{ job_id: string }>("/api/jobs/research", {
@@ -68,9 +76,10 @@ export default function ResearchPage() {
       short_preset: shortP,
       long_preset: longP,
     });
-    setJobId(res.job_id);
     setResult(null);
-    setJobError(null);
+    setRunId("");
+    setWfResult(null);
+    job.trackJob(res.job_id, "快速试策略扫描中…", "research");
   }
 
   function sendToValidation() {
@@ -87,8 +96,8 @@ export default function ResearchPage() {
       train_months: trainMonths,
       test_months: testMonths,
     });
-    setJobId(res.job_id);
     setWfResult(null);
+    job.trackJob(res.job_id, "Walk-Forward 分析中…", "walk_forward");
   }
 
   const combos = result?.combos || [];
@@ -105,7 +114,7 @@ export default function ResearchPage() {
         <PresetSelect label="长均线包" value={longP} options={ma.long} onChange={setLongP} />
       </div>
       <div className="mt-4 flex gap-2">
-        <button className="btn-primary" onClick={runResearch}>
+        <button className="btn-primary" disabled={job.isRunning} onClick={runResearch}>
           开始扫描
         </button>
         {runId && (
@@ -114,13 +123,18 @@ export default function ResearchPage() {
           </button>
         )}
       </div>
-      {jobId && (
+      {researchActive && (
         <JobProgressBar
-          progress={progress}
-          status={status}
-          error={jobError}
+          progress={job.progress}
+          status={job.status}
+          message={job.message}
+          error={job.error}
+          jobType={job.jobType}
+          step={job.step}
+          detail={job.detail}
+          etaSeconds={job.etaSeconds}
           completeAction={
-            status === "completed" && runId
+            job.status === "completed" && runId
               ? { label: "送到仔细验策略", onClick: sendToValidation }
               : undefined
           }
@@ -151,7 +165,7 @@ export default function ResearchPage() {
             />
           </div>
         </div>
-        <button className="btn-secondary mt-3" onClick={runWalkForward}>
+        <button className="btn-secondary mt-3" disabled={job.isRunning} onClick={runWalkForward}>
           运行 Walk-Forward
         </button>
         {wfResult?.segment_count != null && (
@@ -169,7 +183,7 @@ export default function ResearchPage() {
           </div>
         )}
       </details>
-      {combos.length === 0 && !jobId && (
+      {combos.length === 0 && !researchActive && (
         <EmptyState
           title="还没有扫描结果"
           description="选择策略与参数预设后点击「开始扫描」。"

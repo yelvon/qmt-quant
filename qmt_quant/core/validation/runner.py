@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from qmt_quant.config import ROOT_DIR, get_settings
 from qmt_quant.core.catalog.export import load_ohlcv_df, load_price_matrix
+from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.report import build_quantstats_summary
 from qmt_quant.core.validation.compare import compare_with_research
@@ -32,6 +33,8 @@ def run_validation(
 ) -> Dict[str, Any]:
     run_migrations()
     settings = get_settings()
+    if job_id:
+        report_job_progress(job_id, 0.1, "读取研究参数…", step="load")
     research_metrics = None
     if from_run_id:
         with db_session() as conn:
@@ -50,6 +53,14 @@ def run_validation(
             screen_run_id = params.get("screen_run_id", screen_run_id)
 
     start, end = resolve_range_preset(range_preset)
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.2,
+            "加载行情与 OHLCV…",
+            step="load",
+            detail=f"{start} ~ {end} · 策略 {strategy_id}",
+        )
     universe = codes
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
@@ -68,6 +79,14 @@ def run_validation(
     )
     engine_name = engine or settings.validation_engine
     validator = get_validation_engine(engine_name, match_price=match_price, slippage_bps=settings.slippage_bps)
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.45,
+            f"运行 {validation_engine_label(engine_name)} 回测…",
+            step="backtest",
+            detail=f"均线 {short_window}/{long_window} · 成交 {match_price}",
+        )
     params: Dict[str, Any] = {
         "short_window": short_window,
         "long_window": long_window,
@@ -77,6 +96,8 @@ def run_validation(
     result = validator.run(strategy_id, prices, ohlcv=ohlcv, **params)
 
     engine_label = validation_engine_label(engine_name)
+    if job_id:
+        report_job_progress(job_id, 0.72, "对比快速试策略结论…", step="compare")
     benchmark_curve = _benchmark_curve(benchmark, start, end)
     comparison = compare_with_research(result.total_return_pct, research_metrics)
     equity_series = {e["date"]: e["equity"] / 100 for e in result.equity_curve}
@@ -104,6 +125,9 @@ def run_validation(
     reports_dir.mkdir(exist_ok=True)
     out = reports_dir / f"validate_{engine_label}_{strategy_id}_{short_window}_{long_window}.json"
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if job_id:
+        report_job_progress(job_id, 0.9, "保存验证结果…", step="save")
 
     with db_session() as conn:
         run_id = save_backtest_run(

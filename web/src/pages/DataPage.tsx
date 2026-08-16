@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPost, useJobProgress } from "../lib/api";
 import { parseApiError } from "../lib/errorMessages";
 import { useJobTracker } from "../lib/useJobTracker";
 import {
@@ -37,17 +37,23 @@ const ADJUST_OPTIONS = [
   { id: "back", label: "后复权" },
 ];
 
-function checkUrl(sector: string, adjust: string, detailed = false, refresh = false) {
-  const params = new URLSearchParams({
-    detailed: String(detailed),
-    sector,
-    adjust,
-  });
+function summaryUrl(sector: string, adjust: string, refresh = false) {
+  const params = new URLSearchParams({ sector, adjust });
   if (refresh) {
     params.set("refresh", "true");
   }
-  return `/api/data/check?${params.toString()}`;
+  return `/api/data/summary?${params.toString()}`;
 }
+
+type HealthJobState = {
+  progress: number;
+  status: string;
+  message: string;
+  step?: string;
+  detail?: string;
+  etaSeconds?: number | null;
+  error?: string | null;
+};
 
 function qmtStatusUrl(sector: string, refresh = false) {
   const params = new URLSearchParams({ sector });
@@ -87,6 +93,9 @@ function jobProgressProps(
     status: job.status,
     message: job.message,
     error: job.error,
+    jobType: job.jobType,
+    step: job.step,
+    detail: job.detail,
     canResume: job.canResume,
     cancelling: job.cancelling || extras.cancelling,
     resuming: extras.resuming,
@@ -104,11 +113,15 @@ export default function DataPage() {
   const [financialFull, setFinancialFull] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
-  const [check, setCheck] = useState<any>(null);
-  const [checkLoading, setCheckLoading] = useState(true);
-  const [checkRefreshing, setCheckRefreshing] = useState(false);
-  const checkRef = useRef<any>(null);
-  checkRef.current = check;
+  const [summary, setSummary] = useState<any>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [healthCheck, setHealthCheck] = useState<any>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthJob, setHealthJob] = useState<HealthJobState | null>(null);
+  const healthJobIdRef = useRef<string | null>(null);
+  const lastRepairDoneRef = useRef("");
+  const summaryRef = useRef<any>(null);
+  summaryRef.current = summary;
   const defaultsAppliedRef = useRef(false);
   const financialSectionRef = useRef<HTMLDivElement>(null);
   const [qmtOk, setQmtOk] = useState<boolean | null>(null);
@@ -125,9 +138,9 @@ export default function DataPage() {
   const job = useJobTracker();
   const effectiveJobType = job.jobType || inferJobTypeFromMessage(job.message);
 
-  const stockCount = check?.universe_total ?? 0;
-  const hasLocalBars = Boolean(check?.bar_date_min || check?.bar_date_max);
-  const hasLocalFinancial = (check?.financial_row_count ?? 0) > 0;
+  const stockCount = summary?.universe_total ?? 0;
+  const hasLocalBars = Boolean(summary?.bar_date_min || summary?.bar_date_max);
+  const hasLocalFinancial = (summary?.financial_row_count ?? 0) > 0;
 
   const syncPlan = useMemo(
     () =>
@@ -142,6 +155,19 @@ export default function DataPage() {
   const barsJobActive = Boolean(job.jobId) && isBarsSyncJob(effectiveJobType);
   const financialJobActive = Boolean(job.jobId) && isFinancialSyncJob(effectiveJobType);
   const repairJobActive = Boolean(job.jobId) && isRepairJob(effectiveJobType);
+  const repairRunning = repairJobActive && (job.status === "running" || job.status === "pending");
+  const repairJobProgress = repairRunning
+    ? {
+        progress: job.progress,
+        status: job.status,
+        message: job.message,
+        step: job.step,
+        detail: job.detail,
+        etaSeconds: job.etaSeconds,
+        error: job.error,
+        jobType: effectiveJobType,
+      }
+    : null;
 
   const refreshResumable = useCallback(() => {
     return apiGet<ResumableJob[]>("/api/jobs/resumable").then(setResumableJobs).catch(() => {
@@ -166,27 +192,87 @@ export default function DataPage() {
   const barsBlocked = qmtBusy && !isBarsSyncJob(effectiveJobType);
   const financialBlocked = qmtBusy && !isFinancialSyncJob(effectiveJobType);
 
-  const refreshCheck = useCallback((refresh = false) => {
-    if (checkRef.current === null) {
-      setCheckLoading(true);
-    } else {
-      setCheckRefreshing(true);
+  const refreshSummary = useCallback((refresh = false) => {
+    if (summaryRef.current === null) {
+      setSummaryLoading(true);
     }
-
-    const fastPromise = apiGet(checkUrl(sector, adjust, false, refresh)).then((fast) => {
-      setCheck(fast);
-      setCheckLoading(false);
-    });
-
-    const detailedPromise = apiGet(checkUrl(sector, adjust, true, refresh)).then((full) => {
-      setCheck(full);
-    });
-
-    return Promise.all([fastPromise, detailedPromise]).finally(() => {
-      setCheckRefreshing(false);
-      setCheckLoading(false);
-    });
+    return apiGet(summaryUrl(sector, adjust, refresh))
+      .then((data) => {
+        setSummary(data);
+      })
+      .finally(() => {
+        setSummaryLoading(false);
+      });
   }, [sector, adjust]);
+
+  const applyHealthResult = useCallback((full: any) => {
+    setHealthCheck(full);
+    setSummary((prev: any) =>
+      prev
+        ? {
+            ...prev,
+            last_health_scan: {
+              as_of: full.as_of,
+              needs_repair: full.needs_repair,
+              stale_count: full.gap_summary?.stale_count,
+            },
+          }
+        : prev
+    );
+  }, []);
+
+  const runHealthCheck = useCallback(async () => {
+    setHealthLoading(true);
+    setHealthJob(null);
+    try {
+      const res = await apiPost<{ job_id: string }>("/api/jobs/data/check", { sector, adjust });
+      healthJobIdRef.current = res.job_id;
+      setHealthJob({
+        progress: 0.05,
+        status: "running",
+        message: "任务已提交…",
+        step: "prepare",
+      });
+    } catch {
+      setHealthLoading(false);
+      healthJobIdRef.current = null;
+    }
+  }, [sector, adjust]);
+
+  useJobProgress(
+    useCallback(
+      (data: Record<string, unknown>) => {
+        const id = healthJobIdRef.current;
+        if (!id || data.job_id !== id) return;
+
+        const status = String(data.status || "running");
+        setHealthJob({
+          progress: Number(data.progress ?? 0),
+          status,
+          message: String(data.message || data.progress_message || "检查中…"),
+          step: String(data.step || ""),
+          detail: String(data.detail || ""),
+          etaSeconds: data.eta_seconds != null ? Number(data.eta_seconds) : null,
+          error: data.error ? String(data.error) : null,
+        });
+
+        if (status === "completed") {
+          const result = data.result as Record<string, unknown> | undefined;
+          if (result && typeof result === "object") {
+            applyHealthResult(result);
+          }
+          healthJobIdRef.current = null;
+          setHealthLoading(false);
+          setHealthJob(null);
+          refreshSummary(true);
+        } else if (status === "failed" || status === "cancelled") {
+          healthJobIdRef.current = null;
+          setHealthLoading(false);
+        }
+      },
+      [applyHealthResult, refreshSummary]
+    )
+  );
 
   const refreshQmt = useCallback(
     (refresh = false) => {
@@ -200,27 +286,39 @@ export default function DataPage() {
 
   useEffect(() => {
     apiGet<any[]>("/api/options/sectors").then(setSectors);
-    setCheck(null);
-    setCheckLoading(true);
+    setSummary(null);
+    setHealthCheck(null);
+    setHealthJob(null);
+    healthJobIdRef.current = null;
+    setSummaryLoading(true);
     defaultsAppliedRef.current = false;
-    refreshCheck();
+    refreshSummary();
     refreshQmt();
-  }, [sector, adjust, refreshCheck, refreshQmt]);
+  }, [sector, adjust, refreshSummary, refreshQmt]);
 
   useEffect(() => {
-    if (!check || defaultsAppliedRef.current) return;
+    if (!summary || defaultsAppliedRef.current) return;
     defaultsAppliedRef.current = true;
-    const hasBars = Boolean(check.bar_date_min || check.bar_date_max);
+    const hasBars = Boolean(summary.bar_date_min || summary.bar_date_max);
     setSyncMode(pickDefaultSyncMode(hasBars));
     setRangePreset(pickDefaultRangePreset(hasBars));
-  }, [check]);
+  }, [summary]);
 
   useEffect(() => {
     if (job.status === "completed") {
-      refreshCheck(true);
+      refreshSummary(true);
       refreshQmt(true);
     }
-  }, [job.status, refreshCheck, refreshQmt]);
+  }, [job.status, refreshSummary, refreshQmt]);
+
+  useEffect(() => {
+    if (job.status !== "completed" || !isRepairJob(effectiveJobType) || !job.jobId) return;
+    if (lastRepairDoneRef.current === job.jobId) return;
+    lastRepairDoneRef.current = job.jobId;
+    if (healthCheck) {
+      void runHealthCheck();
+    }
+  }, [job.status, job.jobId, effectiveJobType, healthCheck, runHealthCheck]);
 
   useEffect(() => {
     if (financialJobActive && job.isRunning) {
@@ -394,20 +492,20 @@ export default function DataPage() {
             本地日线：
             {hasLocalBars ? (
               <Link to="/data/browse" className="ml-1 font-mono text-emerald-300 hover:underline">
-                {formatLocalRange(check?.bar_date_min, check?.bar_date_max)}
+                {formatLocalRange(summary?.bar_date_min, summary?.bar_date_max)}
               </Link>
             ) : (
-              <span className="ml-1 text-slate-500">暂无</span>
+              <span className="ml-1 text-slate-500">{summaryLoading ? "加载中…" : "暂无"}</span>
             )}
           </span>
           <span className="text-slate-600">·</span>
           <span className="text-slate-300">
             本地财报：
             <span className={`ml-1 ${hasLocalFinancial ? "text-emerald-300" : "text-slate-500"}`}>
-              {formatFinancialSummary(check)}
+              {summaryLoading ? "加载中…" : formatFinancialSummary(summary)}
             </span>
           </span>
-          {checkRefreshing && <span className="text-xs text-slate-500">刷新中…</span>}
+          {summaryLoading && <span className="text-xs text-slate-500">刷新中…</span>}
         </div>
         {qmtOk === false && (
           <p className="mt-2 text-xs text-amber-200/80">
@@ -512,9 +610,9 @@ export default function DataPage() {
             incremental={!financialFull}
             stockCount={stockCount}
             sector={sector}
-            rowCount={check?.financial_row_count}
-            codesCount={check?.financial_codes_count}
-            announceMax={check?.financial_announce_max}
+            rowCount={summary?.financial_row_count}
+            codesCount={summary?.financial_codes_count}
+            announceMax={summary?.financial_announce_max}
           />
 
           <label className="flex items-center gap-2 text-sm text-slate-400">
@@ -583,13 +681,21 @@ export default function DataPage() {
       <div className="card mt-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="font-medium">数据健康</h2>
-          {checkRefreshing && <span className="text-xs text-slate-500">更新中…</span>}
+          {healthLoading && !healthJob && (
+            <span className="text-xs text-slate-500">提交中…</span>
+          )}
         </div>
         <DataHealthPanel
-          check={check}
-          loading={checkLoading}
+          check={healthCheck}
+          lastScan={summary?.last_health_scan}
+          loading={healthLoading}
+          healthJob={healthJob}
+          repairJob={repairJobProgress}
+          onCheck={runHealthCheck}
           onRepair={checkRepair}
-          repairing={repairJobActive && job.isRunning}
+          onRepairCancel={handleCancel}
+          repairCancelling={cancelling && repairRunning}
+          repairing={repairRunning}
         />
       </div>
     </div>

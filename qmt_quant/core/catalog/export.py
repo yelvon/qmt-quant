@@ -50,11 +50,13 @@ def export_catalog(
             meta: Dict[str, object] = {"adjust_type": adjust_type, "instruments": []}
             total = len(export_codes)
             for idx, code in enumerate(export_codes, start=1):
-                if job_id and idx % 25 == 0:
+                if job_id and (idx == 1 or idx % 25 == 0 or idx == total):
                     report_job_progress(
                         job_id,
                         0.96 + 0.03 * (idx / max(total, 1)),
-                        f"导出验策略文件 {idx}/{total}…",
+                        f"导出验策略文件 {idx}/{total}",
+                        step="export",
+                        detail=f"当前 {code}",
                     )
                 with db_session() as conn:
                     frame = load_bars_df(conn, codes=[code], adjust_type=adjust_type)

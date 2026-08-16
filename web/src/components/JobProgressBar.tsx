@@ -1,6 +1,8 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { humanizeError, jobStatusLabel } from "../lib/errorMessages";
+import { formatEtaSeconds } from "../lib/jobProgressUi";
+import JobStepIndicator from "./JobStepIndicator";
 
 type Props = {
   progress: number;
@@ -8,6 +10,9 @@ type Props = {
   message?: string;
   error?: string | null;
   heading?: string;
+  jobType?: string;
+  step?: string;
+  detail?: string;
   completeAction?: { label: string; onClick?: () => void; to?: string };
   onCancel?: () => void;
   onResume?: () => void;
@@ -23,6 +28,9 @@ export default function JobProgressBar({
   message,
   error,
   heading,
+  jobType,
+  step,
+  detail,
   completeAction,
   onCancel,
   onResume,
@@ -36,18 +44,25 @@ export default function JobProgressBar({
   const baseLabel = message || jobStatusLabel(status);
   const label =
     cancelling && status === "running"
-      ? baseLabel.includes("中断") ? baseLabel : `${baseLabel}（中断中…）`
+      ? baseLabel.includes("中断")
+        ? baseLabel
+        : `${baseLabel}（中断中…）`
       : baseLabel;
+  const etaLabel = status === "running" ? formatEtaSeconds(etaSeconds) : "";
   const showCancel = status === "running" && onCancel && !cancelling;
-  const showResume = (status === "cancelled" && canResume && onResume) || false;
+  const showResume = status === "cancelled" && canResume && onResume;
 
   return (
     <div className="mt-3 lg:col-span-3">
       {heading ? <p className="mb-2 text-sm font-medium text-slate-200">{heading}</p> : null}
-      <div className="mb-1 flex justify-between gap-2 text-xs text-slate-400">
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className="shrink-0">{pct}%</span>
+      {status === "running" || status === "pending" ? (
+        <JobStepIndicator jobType={jobType} currentStep={step} />
+      ) : null}
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="min-w-0 flex-1 text-sm leading-snug text-slate-200">{label}</span>
+        <span className="shrink-0 text-xs text-slate-400">{pct}%</span>
       </div>
+      {detail ? <p className="mb-2 text-xs leading-relaxed text-slate-500">{detail}</p> : null}
       <div className="h-2 overflow-hidden rounded-full bg-slate-800">
         <div
           className={`h-full transition-all ${
@@ -60,6 +75,9 @@ export default function JobProgressBar({
           style={{ width: `${pct}%` }}
         />
       </div>
+      {etaLabel && status === "running" && (
+        <p className="mt-1.5 text-xs text-slate-500">预计剩余 {etaLabel}</p>
+      )}
       {(showCancel || showResume) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {showCancel && (
@@ -69,7 +87,7 @@ export default function JobProgressBar({
               disabled={cancelling}
               onClick={onCancel}
             >
-              中断同步
+              中断任务
             </button>
           )}
           {cancelling && status === "running" && (
