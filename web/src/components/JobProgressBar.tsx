@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { humanizeError, jobStatusLabel } from "../lib/errorMessages";
-import { formatEtaSeconds } from "../lib/jobProgressUi";
+import { formatEtaSeconds, humanizeProgressMessage } from "../lib/jobProgressUi";
 import JobStepIndicator from "./JobStepIndicator";
 
 type Props = {
@@ -41,7 +41,7 @@ export default function JobProgressBar({
 }: Props) {
   const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100);
   const human = status === "failed" ? humanizeError(error || message) : null;
-  const baseLabel = message || jobStatusLabel(status);
+  const baseLabel = humanizeProgressMessage(message) || jobStatusLabel(status);
   const label =
     cancelling && status === "running"
       ? baseLabel.includes("中断")

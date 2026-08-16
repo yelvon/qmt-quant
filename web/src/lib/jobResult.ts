@@ -15,3 +15,15 @@ export function resultFromJobRecord(job: Record<string, unknown>): Record<string
     return null;
   }
 }
+
+/** Inline backtest detail when job result already includes an equity curve. */
+export function backtestDetailFromPayload(
+  payload: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null {
+  if (!payload || payload.error) return null;
+  const curve = payload.equity_curve;
+  if (Array.isArray(curve) && curve.length > 0) {
+    return payload;
+  }
+  return null;
+}

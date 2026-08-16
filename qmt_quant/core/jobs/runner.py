@@ -334,6 +334,10 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.validation.runner import run_validation
 
         return run_validation(**params)
+    if job_type == "backtest":
+        from qmt_quant.core.backtest.runner import run_backtest
+
+        return run_backtest(**params)
     if job_type == "screen":
         from qmt_quant.core.screener.dsl import load_rule
         from qmt_quant.core.screener.runner import run_screening

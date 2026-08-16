@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from qmt_quant.adapters.qmt.client import normalize_code
 from qmt_quant.config import get_settings
 from qmt_quant.core.data.kline import build_kline_payload
 from qmt_quant.core.data.query import get_date_range, list_available_adjust_types, query_table
@@ -45,6 +46,12 @@ from qmt_quant.web.auth import require_api_token
 from qmt_quant.web.status_helpers import build_status_actions
 
 
+def _body_codes(code: Optional[str]) -> Optional[List[str]]:
+    if not code or not str(code).strip():
+        return None
+    return [normalize_code(str(code).strip())]
+
+
 class SyncBarsBody(BaseModel):
     sector: str = "沪深A股"
     incremental: bool = True
@@ -61,6 +68,7 @@ class WalkForwardBody(BaseModel):
     long_preset: str = "preset_std"
     train_months: int = 12
     test_months: int = 3
+    code: Optional[str] = None
 
 
 class ScreenIcBody(BaseModel):
@@ -100,6 +108,7 @@ class ResearchBody(BaseModel):
     long_preset: str = "preset_std"
     fee_preset: str = "default"
     screen_run_id: Optional[str] = None
+    code: Optional[str] = None
 
 
 class ValidateBody(BaseModel):
@@ -110,6 +119,20 @@ class ValidateBody(BaseModel):
     match: str = "next_open"
     benchmark: str = "hs300"
     screen_run_id: Optional[str] = None
+    code: Optional[str] = None
+
+
+class BacktestBody(BaseModel):
+    strategy: str = "ma_cross"
+    sector: str = "沪深A股"
+    range_preset: str = "3y"
+    short_preset: str = "preset_std"
+    long_preset: str = "preset_std"
+    fee_preset: str = "default"
+    match: str = "next_open"
+    benchmark: str = "hs300"
+    screen_run_id: Optional[str] = None
+    code: Optional[str] = None
 
 
 class ScreenBody(BaseModel):
@@ -494,8 +517,9 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/research")
     def job_research(body: ResearchBody) -> Dict[str, str]:
+        codes = _body_codes(body.code)
         job_id = submit_job(
-            display_name="快速试策略",
+            display_name=f"单股扫描 {codes[0]}" if codes else "快速试策略",
             job_type="research",
             env="quant",
             params={
@@ -506,12 +530,14 @@ def create_app() -> FastAPI:
                 "long_preset": body.long_preset,
                 "fee_preset": body.fee_preset,
                 "screen_run_id": body.screen_run_id,
+                "codes": codes,
             },
         )
         return {"job_id": job_id}
 
     @app.post("/api/jobs/research/walk-forward")
     def job_walk_forward(body: WalkForwardBody) -> Dict[str, str]:
+        codes = _body_codes(body.code)
         job_id = submit_job(
             display_name="Walk-Forward 稳健性",
             job_type="walk_forward",
@@ -524,6 +550,7 @@ def create_app() -> FastAPI:
                 "long_preset": body.long_preset,
                 "train_bars": body.train_months * 21,
                 "test_bars": body.test_months * 21,
+                "codes": codes,
             },
         )
         return {"job_id": job_id}
@@ -545,8 +572,31 @@ def create_app() -> FastAPI:
                 detail = {}
         return {"run": run, "detail": detail}
 
+    @app.post("/api/jobs/backtest")
+    def job_backtest(body: BacktestBody) -> Dict[str, str]:
+        codes = _body_codes(body.code)
+        job_id = submit_job(
+            display_name=f"单股回测 {codes[0]}" if codes else "策略回测",
+            job_type="backtest",
+            env="quant",
+            params={
+                "strategy_id": body.strategy,
+                "sector": body.sector,
+                "range_preset": body.range_preset,
+                "short_preset": body.short_preset,
+                "long_preset": body.long_preset,
+                "fee_preset": body.fee_preset,
+                "match_price": body.match,
+                "benchmark": body.benchmark,
+                "screen_run_id": body.screen_run_id,
+                "codes": codes,
+            },
+        )
+        return {"job_id": job_id}
+
     @app.post("/api/jobs/validate")
     def job_validate(body: ValidateBody) -> Dict[str, str]:
+        codes = _body_codes(body.code)
         job_id = submit_job(
             display_name="仔细验策略",
             job_type="validate",
@@ -559,6 +609,7 @@ def create_app() -> FastAPI:
                 "match_price": body.match,
                 "benchmark": body.benchmark,
                 "screen_run_id": body.screen_run_id,
+                "codes": codes,
             },
         )
         return {"job_id": job_id}

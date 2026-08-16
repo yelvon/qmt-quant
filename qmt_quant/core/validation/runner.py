@@ -11,6 +11,7 @@ from qmt_quant.core.catalog.export import load_ohlcv_df, load_price_matrix
 from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.report import build_quantstats_summary
+from qmt_quant.core.research.universe import universe_from_research_run
 from qmt_quant.core.validation.compare import compare_with_research
 from qmt_quant.core.validation.engine import get_validation_engine, validation_engine_label
 from qmt_quant.storage.database import db_session, run_migrations
@@ -34,14 +35,16 @@ def run_validation(
     run_migrations()
     settings = get_settings()
     if job_id:
-        report_job_progress(job_id, 0.1, "读取研究参数…", step="load")
+        report_job_progress(job_id, 0.1, "读取扫描参数…", step="load")
     research_metrics = None
+    research_row: Optional[dict] = None
+    universe = list(codes) if codes else None
     if from_run_id:
         with db_session() as conn:
-            research = get_backtest_run(conn, from_run_id)
-        if research:
-            research_metrics = research.get("metrics")
-            params = research.get("params", {})
+            research_row = get_backtest_run(conn, from_run_id)
+        if research_row:
+            research_metrics = research_row.get("metrics")
+            params = research_row.get("params", {})
             best = research_metrics or {}
             label = best.get("label", "20/120")
             if strategy_id == "ma_cross" and "/" in str(label):
@@ -49,19 +52,22 @@ def run_validation(
                 short_window = int(parts[0])
                 long_window = int(parts[1])
             range_preset = params.get("range_preset", range_preset)
-            strategy_id = research.get("strategy_id", strategy_id)
+            strategy_id = research_row.get("strategy_id", strategy_id)
             screen_run_id = params.get("screen_run_id", screen_run_id)
+            resolved = universe_from_research_run(research_row)
+            if resolved:
+                universe = resolved
 
     start, end = resolve_range_preset(range_preset)
+    n_label = f"{len(universe)} 只股票" if universe else "加载股票池"
     if job_id:
         report_job_progress(
             job_id,
             0.2,
-            "加载行情与 OHLCV…",
+            "加载行情数据…",
             step="load",
-            detail=f"{start} ~ {end} · 策略 {strategy_id}",
+            detail=f"{start} ~ {end} · {n_label} · 策略 {strategy_id}",
         )
-    universe = codes
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
         start_date=start,
@@ -83,9 +89,9 @@ def run_validation(
         report_job_progress(
             job_id,
             0.45,
-            f"运行 {validation_engine_label(engine_name)} 回测…",
+            "按 A 股规则回测…",
             step="backtest",
-            detail=f"均线 {short_window}/{long_window} · 成交 {match_price}",
+            detail=f"{len(prices.columns)} 只股票 · 均线 {short_window}/{long_window} · 成交 {match_price}",
         )
     params: Dict[str, Any] = {
         "short_window": short_window,
@@ -97,7 +103,7 @@ def run_validation(
 
     engine_label = validation_engine_label(engine_name)
     if job_id:
-        report_job_progress(job_id, 0.72, "对比快速试策略结论…", step="compare")
+        report_job_progress(job_id, 0.72, "汇总指标与结论…", step="compare")
     benchmark_curve = _benchmark_curve(benchmark, start, end)
     comparison = compare_with_research(result.total_return_pct, research_metrics)
     equity_series = {e["date"]: e["equity"] / 100 for e in result.equity_curve}
@@ -119,6 +125,7 @@ def run_validation(
         "trades": [t.__dict__ for t in result.trades[:20]],
         "quantstats": quantstats,
         "engine": engine_label,
+        "codes": universe or list(prices.columns),
     }
 
     reports_dir = ROOT_DIR / "reports"
@@ -141,6 +148,7 @@ def run_validation(
                 "match_price": match_price,
                 "from_run_id": from_run_id,
                 "screen_run_id": screen_run_id,
+                "codes": universe,
             },
             metrics={
                 "total_return_pct": result.total_return_pct,

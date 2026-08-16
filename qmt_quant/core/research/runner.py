@@ -15,10 +15,16 @@ from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import FEE_PRESETS, ma_param_combos
 from qmt_quant.core.research.report import build_quantstats_summary
+from qmt_quant.core.research.universe import resolve_research_universe
 from qmt_quant.core.screener.bridge import load_codes_by_run_id
-from qmt_quant.core.sync.universe import resolve_universe
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import save_backtest_run
+
+
+def _research_title(strategy_id: str, range_preset: str, codes: Optional[List[str]]) -> str:
+    if codes and len(codes) == 1:
+        return f"{strategy_id} {codes[0]} {range_preset}"
+    return f"{strategy_id} {range_preset}"
 
 
 def run_research(
@@ -44,17 +50,12 @@ def run_research(
             detail=f"策略 {strategy_id} · 区间 {range_preset}",
         )
     start, end = resolve_range_preset(range_preset)
-    if screen_run_id:
-        universe = load_codes_by_run_id(screen_run_id)
-    elif codes:
-        universe = codes
-    else:
-        universe = resolve_universe(sector)
-        if sector in ("watchlist", "我的自选池"):
-            universe = resolve_universe("watchlist")
-
-    cap = None if strategy_id == "screening_rebalance" else 50
-    load_codes = universe[:cap] if cap and universe else universe
+    load_codes = resolve_research_universe(
+        sector=sector,
+        strategy_id=strategy_id,
+        codes=codes,
+        screen_run_id=screen_run_id,
+    )
 
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
@@ -98,6 +99,8 @@ def run_research(
     equity_map = _equity_from_result(result, prices)
     result["quantstats"] = build_quantstats_summary(equity_map)
     result["best"]["quantstats"] = result["quantstats"]
+    used_codes = list(prices.columns)
+    result["universe_codes"] = used_codes
 
     reports_dir = ROOT_DIR / "reports"
     reports_dir.mkdir(exist_ok=True)
@@ -113,7 +116,7 @@ def run_research(
             conn,
             engine="vectorbt",
             strategy_id=strategy_id,
-            title=f"{strategy_id} {range_preset}",
+            title=_research_title(strategy_id, range_preset, used_codes if len(used_codes) == 1 else codes),
             params={
                 "sector": sector,
                 "range_preset": range_preset,
@@ -121,6 +124,7 @@ def run_research(
                 "long_preset": long_preset,
                 "fee_preset": fee_preset,
                 "screen_run_id": screen_run_id,
+                "codes": used_codes,
             },
             metrics=result["best"],
             result_path=str(result_path),

@@ -111,6 +111,7 @@ def run_walk_forward_study(
     train_bars: int = 252,
     test_bars: int = 63,
     step_bars: int | None = None,
+    codes: Optional[List[str]] = None,
     job_id: Optional[str] = None,
 ) -> dict:
     """Load prices and run walk-forward analysis, persisting results."""
@@ -125,7 +126,10 @@ def run_walk_forward_study(
             step="load",
             detail=f"{start} ~ {end} · train {train_bars} / test {test_bars} 根 K 线",
         )
-    universe = resolve_universe(sector)[:50]
+    if codes:
+        universe = codes
+    else:
+        universe = resolve_universe(sector)[:50]
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
         start_date=start,
@@ -152,6 +156,7 @@ def run_walk_forward_study(
         "range_preset": range_preset,
         "train_bars": train_bars,
         "test_bars": test_bars,
+        "codes": codes,
     }
 
     reports_dir = ROOT_DIR / "reports"

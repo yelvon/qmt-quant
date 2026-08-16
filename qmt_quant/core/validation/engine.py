@@ -93,5 +93,14 @@ def get_validation_engine(name: str | None = None, **kwargs) -> ValidationEngine
 
 
 def validation_engine_label(name: str | None = None) -> str:
+    """Internal engine id stored in DB / reports."""
     engine_name = name or get_settings().validation_engine
     return "nautilus" if engine_name == "nautilus" else "custom_validator"
+
+
+def validation_engine_display_name(name: str | None = None) -> str:
+    """User-facing engine name (never show raw ids in UI copy)."""
+    engine_name = name or get_settings().validation_engine
+    if engine_name == "nautilus":
+        return "高保真引擎"
+    return "A 股规则引擎"

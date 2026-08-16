@@ -48,6 +48,11 @@ export const JOB_STEP_DEFS: Record<string, JobStepDef[]> = {
     { id: "compare", label: "对比结论" },
     { id: "save", label: "保存结果" },
   ],
+  backtest: [
+    { id: "scan", label: "筛选参数" },
+    { id: "backtest", label: "规则回测" },
+    { id: "save", label: "保存结果" },
+  ],
   screen: [
     { id: "load", label: "加载数据" },
     { id: "scan", label: "逐股筛选" },
@@ -77,4 +82,21 @@ export function formatEtaSeconds(seconds: number | null | undefined): string {
 
 export function stepsForJobType(jobType: string): JobStepDef[] {
   return JOB_STEP_DEFS[jobType] || [];
+}
+
+/** Strip internal engine ids from progress messages shown in the UI. */
+export function humanizeProgressMessage(message?: string | null): string {
+  if (!message) return "";
+  let text = message;
+  const replacements: [RegExp, string][] = [
+    [/custom_validator/gi, "A 股规则引擎"],
+    [/vectorbt/gi, "快速扫描"],
+    [/nautilus/gi, "高保真引擎"],
+    [/运行\s*A 股规则引擎\s*回测/g, "按 A 股规则回测"],
+    [/运行\s*高保真引擎\s*回测/g, "按高保真规则回测"],
+  ];
+  for (const [pattern, repl] of replacements) {
+    text = text.replace(pattern, repl);
+  }
+  return text;
 }

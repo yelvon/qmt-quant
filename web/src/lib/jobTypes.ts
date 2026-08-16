@@ -31,6 +31,10 @@ export function isRepairJob(jobType: string): boolean {
   return jobType === "sync_check_repair" || jobType === "sync_repair";
 }
 
+export function isBacktestJob(jobType: string): boolean {
+  return jobType === "backtest";
+}
+
 export function isResearchJob(jobType: string): boolean {
   return jobType === "research" || jobType === "walk_forward";
 }
@@ -60,6 +64,8 @@ export function jobTypeLabel(jobType: string): string {
       return "导出验策略";
     case "research":
       return "快速试策略";
+    case "backtest":
+      return "策略回测";
     case "walk_forward":
       return "Walk-Forward";
     case "validate":
@@ -83,6 +89,7 @@ export function inferJobTypeFromMessage(message: string): string {
   if (message.includes("修复")) return "sync_check_repair";
   if (message.includes("导出")) return "catalog_export";
   if (message.includes("Walk-Forward") || message.includes("walk-forward")) return "walk_forward";
+  if (message.includes("策略回测")) return "backtest";
   if (message.includes("验证") || message.includes("仔细验")) return "validate";
   if (message.includes("选股")) return "screen";
   if (message.includes("IC") || message.includes("因子")) return "screen_ic";
@@ -106,6 +113,7 @@ export function jobRouteForType(jobType: string): string {
       return "/data";
     case "research":
     case "walk_forward":
+    case "backtest":
       return "/research";
     case "validate":
       return "/validation";

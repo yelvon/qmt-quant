@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { apiGet } from "./api";
 import { inferJobTypeFromMessage, jobRouteForType, jobTypeLabel } from "./jobTypes";
-import { formatEtaSeconds } from "./jobProgressUi";
+import { formatEtaSeconds, humanizeProgressMessage } from "./jobProgressUi";
 
 export type JobState = {
   jobId: string;
@@ -16,6 +16,7 @@ export type JobState = {
   canResume: boolean;
   cancelling: boolean;
   etaSeconds: number | null;
+  result: Record<string, unknown> | null;
 };
 
 export type JobTrackerValue = JobState & {
@@ -40,6 +41,7 @@ const EMPTY_STATE: JobState = {
   canResume: false,
   cancelling: false,
   etaSeconds: null,
+  result: null,
 };
 
 const JobContext = React.createContext<JobTrackerValue | null>(null);
@@ -58,8 +60,11 @@ function applyJobPayload(
 ): JobState {
   if (data.job_id && data.job_id !== jobId) return prev;
   const status = String(data.status || prev.status || "");
-  const result = (data.result as Record<string, unknown> | undefined) || undefined;
-  const checkpoint = result?.checkpoint;
+  if (TERMINAL.has(prev.status) && status === "running") {
+    return prev;
+  }
+  const resultPayload = data.result as Record<string, unknown> | undefined;
+  const checkpoint = resultPayload?.checkpoint;
   const cancelling =
     Boolean(data.cancelling) || (prev.cancelling && status === "running");
   return {
@@ -79,6 +84,7 @@ function applyJobPayload(
         : status === "running"
           ? prev.etaSeconds
           : null,
+    result: resultPayload ?? prev.result,
   };
 }
 
@@ -98,8 +104,11 @@ function stateFromApiJob(job: Record<string, unknown>): JobState {
     canResume: status === "cancelled" && !!result?.checkpoint,
     cancelling: Boolean(job.cancel_requested),
     etaSeconds: null,
+    result: (result as Record<string, unknown> | undefined) ?? null,
   };
 }
+
+const TRACKED_JOB_KEY = "qmt_tracked_job_id";
 
 export function JobProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<JobState>(EMPTY_STATE);
@@ -129,7 +138,13 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
         canResume: false,
         cancelling: false,
         etaSeconds: null,
+        result: null,
       });
+      try {
+        sessionStorage.setItem(TRACKED_JOB_KEY, jobId);
+      } catch {
+        /* ignore */
+      }
     },
     []
   );
@@ -155,6 +170,18 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
         });
         if (active) {
           adoptJob(active);
+          return;
+        }
+        let savedId = "";
+        try {
+          savedId = sessionStorage.getItem(TRACKED_JOB_KEY) || "";
+        } catch {
+          savedId = "";
+        }
+        if (!savedId) return;
+        const saved = jobs.find((j) => String(j.id || "") === savedId);
+        if (saved && String(saved.status || "") === "completed") {
+          adoptJob(saved);
         }
       })
       .catch(() => {
@@ -177,11 +204,11 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     const id = state.jobId;
-    if (!id || TERMINAL.has(state.status)) return;
+    if (!id) return;
 
     let cancelled = false;
-    const intervalMs = state.cancelling ? 800 : 2000;
-    const poll = async () => {
+
+    const pull = async () => {
       try {
         const res = await fetch(`/api/jobs/${id}`);
         if (!res.ok || cancelled) return;
@@ -200,13 +227,36 @@ export function JobProvider({ children }: { children: React.ReactNode }) {
         /* ignore */
       }
     };
-    poll();
-    const timer = window.setInterval(poll, intervalMs);
+
+    if (TERMINAL.has(state.status)) {
+      if (state.status === "completed" && !state.result) {
+        pull();
+        const timer = window.setInterval(() => {
+          if (cancelled) return;
+          pull();
+        }, 1200);
+        const stop = window.setTimeout(() => {
+          window.clearInterval(timer);
+        }, 15000);
+        return () => {
+          cancelled = true;
+          window.clearInterval(timer);
+          window.clearTimeout(stop);
+        };
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const intervalMs = state.cancelling ? 800 : 2000;
+    pull();
+    const timer = window.setInterval(pull, intervalMs);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [state.jobId, state.status, state.cancelling, handleUpdate]);
+  }, [state.jobId, state.status, state.cancelling, state.result, handleUpdate]);
 
   const resetJob = React.useCallback(() => {
     jobIdRef.current = "";
@@ -285,7 +335,9 @@ export function GlobalJobBanner() {
           <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
             {typeLabel}进行中
           </Link>
-          <span className="min-w-0 flex-1 truncate text-slate-300">{job.message || "运行中…"}</span>
+          <span className="min-w-0 flex-1 truncate text-slate-300">
+            {humanizeProgressMessage(job.message) || "运行中…"}
+          </span>
           <span className="shrink-0 text-slate-400">{pct}%</span>
           <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
             <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />

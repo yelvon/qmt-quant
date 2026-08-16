@@ -12,6 +12,7 @@ type Props = {
   comparison?: Comparison;
   verdict?: string;
   totalReturnPct?: number;
+  variant?: "simple" | "research";
 };
 
 function verdictColor(v: string) {
@@ -20,24 +21,32 @@ function verdictColor(v: string) {
   return "text-amber-400";
 }
 
-export default function ComparisonCard({ comparison, verdict, totalReturnPct }: Props) {
+export default function ComparisonCard({
+  comparison,
+  verdict,
+  totalReturnPct,
+  variant = "research",
+}: Props) {
   const v = verdict || comparison?.verdict || "—";
   const research = comparison?.research_return_pct;
   const validation = comparison?.validation_return_pct ?? totalReturnPct;
   const delta = comparison?.delta_pct;
+  const quickLabel = variant === "simple" ? "快速扫描" : "③ 快速试";
+  const strictLabel = variant === "simple" ? "规则回测" : "④ 仔细验";
+  const adjustHint = variant === "simple" ? "回到策略回测调整" : "回到③调整参数";
 
   return (
     <div className="card">
       <p className={`text-lg font-medium ${verdictColor(v)}`}>结论：{v}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg bg-slate-900/60 p-3">
-          <p className="text-xs text-slate-500">③ 快速试</p>
+          <p className="text-xs text-slate-500">{quickLabel}</p>
           <p className="text-xl font-semibold text-slate-200">
             {research != null ? `${research}%` : "—"}
           </p>
         </div>
         <div className="rounded-lg bg-slate-900/60 p-3">
-          <p className="text-xs text-slate-500">④ 仔细验</p>
+          <p className="text-xs text-slate-500">{strictLabel}</p>
           <p className="text-xl font-semibold text-emerald-400">
             {validation != null ? `${validation}%` : "—"}
           </p>
@@ -57,7 +66,7 @@ export default function ComparisonCard({ comparison, verdict, totalReturnPct }: 
         )}
         {(v === "建议复核" || v === "不建议") && (
           <Link to="/research" className="btn-secondary">
-            回到③调整参数
+            {adjustHint}
           </Link>
         )}
       </div>
