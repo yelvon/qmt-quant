@@ -19,6 +19,7 @@ import { backtestDetailFromPayload } from "../lib/jobResult";
 import { useJobTracker } from "../lib/useJobTracker";
 import BacktestModeSwitch from "../components/BacktestModeSwitch";
 import BacktestResultSkeleton from "../components/BacktestResultSkeleton";
+import StockReturnsTable from "../components/StockReturnsTable";
 import StockSearchInput from "../components/StockSearchInput";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
@@ -710,6 +711,11 @@ export default function ResearchPage() {
             </details>
             <TechnicalDetails data={effectiveValidateDetail} />
           </div>
+          {isSimple &&
+            Array.isArray(effectiveValidateDetail.stock_returns) &&
+            effectiveValidateDetail.stock_returns.length > 1 && (
+              <StockReturnsTable rows={effectiveValidateDetail.stock_returns} />
+            )}
         </div>
       )}
 

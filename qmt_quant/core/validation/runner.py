@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from qmt_quant.config import ROOT_DIR, get_settings
 from qmt_quant.core.catalog.export import load_ohlcv_df, load_price_matrix
@@ -14,6 +14,7 @@ from qmt_quant.core.research.report import build_quantstats_summary
 from qmt_quant.core.research.universe import universe_from_research_run
 from qmt_quant.core.validation.compare import compare_with_research
 from qmt_quant.core.validation.engine import get_validation_engine, validation_engine_label
+from qmt_quant.core.validation.per_stock import compute_per_stock_returns
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, save_backtest_run
 
@@ -109,6 +110,20 @@ def run_validation(
     equity_series = {e["date"]: e["equity"] / 100 for e in result.equity_curve}
     quantstats = build_quantstats_summary(equity_series)
 
+    resolved_codes = universe or list(prices.columns)
+    stock_returns: List[Dict[str, Any]] = []
+    if len(resolved_codes) > 1:
+        stock_returns = compute_per_stock_returns(
+            strategy_id=strategy_id,
+            prices=prices,
+            ohlcv=ohlcv,
+            codes=resolved_codes,
+            match_price=match_price,
+            slippage_bps=settings.slippage_bps,
+            params=params,
+            job_id=job_id,
+        )
+
     payload: Dict[str, Any] = {
         "strategy_id": strategy_id,
         "short_window": short_window,
@@ -125,8 +140,10 @@ def run_validation(
         "trades": [t.__dict__ for t in result.trades[:20]],
         "quantstats": quantstats,
         "engine": engine_label,
-        "codes": universe or list(prices.columns),
+        "codes": resolved_codes,
     }
+    if stock_returns:
+        payload["stock_returns"] = stock_returns
 
     reports_dir = ROOT_DIR / "reports"
     reports_dir.mkdir(exist_ok=True)

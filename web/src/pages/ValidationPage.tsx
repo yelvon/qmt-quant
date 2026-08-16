@@ -16,6 +16,7 @@ import ComparisonCard from "../components/ComparisonCard";
 import EmptyState from "../components/EmptyState";
 import StrategyErrorCard from "../components/StrategyErrorCard";
 import TechnicalDetails from "../components/TechnicalDetails";
+import StockReturnsTable from "../components/StockReturnsTable";
 
 type RunOption = PastRunOption;
 
@@ -295,6 +296,9 @@ export default function ValidationPage() {
             )}
             <TechnicalDetails data={detail} />
           </div>
+          {Array.isArray(detail.stock_returns) && detail.stock_returns.length > 1 && (
+            <StockReturnsTable rows={detail.stock_returns} />
+          )}
         </div>
       )}
     </div>

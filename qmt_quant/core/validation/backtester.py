@@ -56,6 +56,7 @@ class AShareDailyBacktester:
         slippage_bps: float | None = None,
         match_price: str = "next_open",
         enforce_limit: bool = True,
+        position_size_pct: float = 0.1,
     ) -> None:
         settings = get_settings()
         self.prices = prices.sort_index()
@@ -71,6 +72,7 @@ class AShareDailyBacktester:
         self.slippage_bps = slippage_bps if slippage_bps is not None else settings.slippage_bps
         self.match_price = match_price
         self.enforce_limit = enforce_limit
+        self.position_size_pct = min(max(float(position_size_pct), 0.01), 1.0)
         self.venue = DEFAULT_VENUE
         self.cash = self.initial_cash
         self.positions: Dict[str, int] = {}
@@ -150,7 +152,9 @@ class AShareDailyBacktester:
                 if prev_sig <= 0 and curr_sig > 0 and pos == 0:
                     if self._limit_blocks_buy(code, exec_idx):
                         continue
-                    qty = round_lots(self.cash * 0.1 / exec_price, self.venue.lot_size)
+                    qty = round_lots(
+                        self.cash * self.position_size_pct / exec_price, self.venue.lot_size
+                    )
                     if qty >= self.venue.lot_size:
                         self._buy(exec_date, code, exec_price, qty)
                 elif not hold_only and prev_sig > 0 and curr_sig <= 0 and pos > 0:
