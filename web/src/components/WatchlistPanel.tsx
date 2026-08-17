@@ -163,7 +163,7 @@ export default function WatchlistPanel({ onSyncWatchlist, compact = false }: Pro
               同步自选池日线
             </button>
           )}
-          <span>回测/扫描最多取前 50 只</span>
+          <span>回测/扫描默认使用全部自选股</span>
           <Link to="/research" className="underline hover:text-slate-300">
             去策略回测
           </Link>

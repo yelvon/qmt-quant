@@ -64,6 +64,7 @@ def compute_per_stock_returns(
 
         series = prices[code].dropna()
         if len(series) < 5:
+            rows.append({"code": code, "error": "insufficient_price_data", "bar_count": len(series)})
             continue
 
         sub_prices = prices[[code]]
@@ -72,11 +73,32 @@ def compute_per_stock_returns(
             sub_ohlcv = ohlcv.loc[ohlcv["code"] == code].copy()
 
         try:
-            result = validator.run(strategy_id, sub_prices, ohlcv=sub_ohlcv, **params)
-        except Exception:
+            sub_params = dict(params)
+            signal_prices = sub_params.get("signal_prices")
+            if isinstance(signal_prices, pd.DataFrame) and code in signal_prices.columns:
+                sub_params["signal_prices"] = signal_prices[[code]]
+            signal_ohlcv = sub_params.get("signal_ohlcv")
+            if (
+                isinstance(signal_ohlcv, pd.DataFrame)
+                and not signal_ohlcv.empty
+                and "code" in signal_ohlcv.columns
+            ):
+                sub_params["signal_ohlcv"] = signal_ohlcv.loc[
+                    signal_ohlcv["code"] == code
+                ].copy()
+            result = validator.run(strategy_id, sub_prices, ohlcv=sub_ohlcv, **sub_params)
+        except Exception as exc:
+            rows.append(
+                {
+                    "code": code,
+                    "error": type(exc).__name__,
+                    "message": str(exc)[:300],
+                }
+            )
             continue
 
         if not result.equity_curve:
+            rows.append({"code": code, "error": "empty_equity_curve"})
             continue
 
         rows.append(
@@ -95,5 +117,8 @@ def compute_per_stock_returns(
     for row in rows:
         row["name"] = names.get(row["code"], "")
 
-    rows.sort(key=lambda r: (r["total_return_pct"], r["code"]), reverse=True)
+    rows.sort(
+        key=lambda r: (r.get("error") is None, r.get("total_return_pct", float("-inf")), r["code"]),
+        reverse=True,
+    )
     return rows

@@ -342,7 +342,9 @@ export function GlobalJobBanner() {
     return () => window.clearInterval(timer);
   }, [refreshOthers, job.status, job.jobId]);
 
-  const focusedVisible = Boolean(job.jobId) && (job.isRunning || job.status === "cancelled");
+  const focusedVisible =
+    Boolean(job.jobId) &&
+    (job.isRunning || job.status === "cancelled" || job.status === "completed" || job.status === "failed");
   const extra = others.filter((j) => String(j.id || "") !== job.jobId);
   if (!focusedVisible && extra.length === 0) return null;
 
@@ -352,21 +354,40 @@ export function GlobalJobBanner() {
   const etaLabel = formatEtaSeconds(job.etaSeconds);
 
   return (
-    <div className="border-b border-emerald-900/40 bg-emerald-950/40 px-6 py-2">
+    <div className="border-b border-emerald-900/40 bg-emerald-950/40 px-4 py-2 sm:px-6">
       <div className="mx-auto max-w-6xl space-y-1">
         {focusedVisible && (
           <>
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
-                {typeLabel}进行中
+                {typeLabel}
+                {job.status === "completed"
+                  ? "已完成"
+                  : job.status === "failed"
+                    ? "失败"
+                    : job.status === "cancelled"
+                      ? "已中断"
+                      : "进行中"}
               </Link>
               <span className="min-w-0 flex-1 truncate text-slate-300">
                 {humanizeProgressMessage(job.message) || "运行中…"}
               </span>
-              <span className="shrink-0 text-slate-400">{pct}%</span>
-              <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
-                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-              </div>
+              {job.isRunning && <span className="shrink-0 text-slate-400">{pct}%</span>}
+              {job.isRunning && (
+                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-800 sm:w-32">
+                  <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+                </div>
+              )}
+              {job.status === "completed" && (
+                <Link to={dataRoute} className="shrink-0 text-xs text-emerald-300 underline">
+                  查看结果
+                </Link>
+              )}
+              {!job.isRunning && (
+                <button type="button" className="shrink-0 text-xs text-slate-500 hover:text-slate-300" onClick={job.resetJob}>
+                  关闭
+                </button>
+              )}
             </div>
             {(job.detail || etaLabel) && (
               <p className="truncate pl-0 text-xs text-slate-500">

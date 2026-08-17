@@ -11,6 +11,7 @@ import SettingsPage from "./pages/SettingsPage";
 import JobsPage from "./pages/JobsPage";
 import IcPage from "./pages/IcPage";
 import HelpPage from "./pages/HelpPage";
+import ExperimentsPage from "./pages/ExperimentsPage";
 
 export default function App() {
   return (
@@ -21,6 +22,8 @@ export default function App() {
         <Route path="/data/browse" element={<DataBrowsePage />} />
         <Route path="/research" element={<ResearchPage />} />
         <Route path="/validation" element={<ValidationPage />} />
+        <Route path="/experiments" element={<ExperimentsPage />} />
+        <Route path="/experiments/:runId" element={<ExperimentsPage />} />
         <Route path="/screening" element={<ScreeningPage />} />
         <Route path="/live" element={<LivePage />} />
         <Route path="/settings" element={<SettingsPage />} />

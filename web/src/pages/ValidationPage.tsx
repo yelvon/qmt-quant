@@ -31,6 +31,7 @@ export default function ValidationPage() {
   const [runs, setRuns] = useState<RunOption[]>([]);
   const [validateHistory, setValidateHistory] = useState<RunOption[]>([]);
   const [match, setMatch] = useState("next_open");
+  const [barFrequency, setBarFrequency] = useState("daily");
   const [detail, setDetail] = useState<any>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -60,6 +61,10 @@ export default function ValidationPage() {
       return;
     }
     setDetail(v.detail);
+    const inheritedFrequency = v.detail?.bar_frequency || v.detail?.metadata?.bar_frequency;
+    if (inheritedFrequency === "daily" || inheritedFrequency === "weekly") {
+      setBarFrequency(inheritedFrequency);
+    }
     setPageError(null);
   }, []);
 
@@ -92,7 +97,11 @@ export default function ValidationPage() {
     let cancelled = false;
     apiGet<any>(`/api/research/${fromRun}`)
       .then((res) => {
-        if (!cancelled) setResearchPreview(res.detail || null);
+        if (!cancelled) {
+          setResearchPreview(res.detail || null);
+          const frequency = res.detail?.bar_frequency;
+          if (frequency === "daily" || frequency === "weekly") setBarFrequency(frequency);
+        }
       })
       .catch(() => {
         if (!cancelled) setResearchPreview(null);
@@ -112,6 +121,7 @@ export default function ValidationPage() {
         match,
         benchmark: "hs300",
         engine: engine || undefined,
+        bar_frequency: barFrequency,
       });
       job.trackJob(res.job_id, "仔细验策略运行中…", "validate");
     } catch (err) {
@@ -214,7 +224,21 @@ export default function ValidationPage() {
           options={engineOptions.length ? engineOptions : [{ id: "custom", label: "A 股规则引擎" }]}
           onChange={setEngine}
         />
+        <PresetSelect
+          label="K 线周期"
+          value={barFrequency}
+          options={[
+            { id: "daily", label: "日线" },
+            { id: "weekly", label: "周线" },
+          ]}
+          onChange={setBarFrequency}
+        />
       </div>
+      <p className="mt-2 text-xs text-slate-400">
+        {barFrequency === "weekly"
+          ? "周线信号在该周实际最后交易日收盘后确认，下一实际交易日开盘成交；成交仍使用日线执行上下文。"
+          : "日线收盘确认信号，下一实际交易日开盘成交。"}
+      </p>
 
       {engine === "nautilus" && (
         <p className="mt-2 text-xs text-amber-300/90">

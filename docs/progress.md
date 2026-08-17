@@ -1,6 +1,6 @@
 # qmt-quant Implementation Progress
 
-> Last updated: 2026-08-17  
+> Last updated: 2026-08-18
 > PRD version: v0.3
 
 ## Phase Milestones
@@ -10,11 +10,11 @@
 | 1 | Data sync + PostgreSQL + Parquet | Done |
 | 2 | VectorBT research + QuantStats | Done |
 | 3a | Custom A-share validator (T+1, fees) | Done |
-| 3b | NautilusTrader integration | In progress (MVP) |
+| 3b | NautilusTrader integration | Experimental (MVP, no fallback) |
 | 4 | Screening DSL + backtest bridge + IC | Done |
 | 5 | xttrader live trading | Partial |
 | 6 | Web UI enhancements | Done |
-| 7 | NautilusTrader + NT Parquet Catalog | In progress (MVP) |
+| 7 | NautilusTrader + NT Parquet Catalog | Experimental (MVP, no fallback) |
 
 ## P0 Data Sync (§6.1)
 
@@ -46,21 +46,25 @@
 | ID | Requirement | Status |
 |----|-------------|--------|
 | BT-V-001 | Single-symbol signals | Done |
-| BT-V-002 | Multi-symbol cross-section | Partial（默认代码序 50，可选成交额抽样） |
+| BT-V-002 | Multi-symbol cross-section | Partial（默认确定性完整股票池；可显式期初成交额抽样） |
 | BT-V-003 | Parameter grid search | Done |
 | BT-V-004 | cash_sharing portfolio | Done |
 | BT-V-005 | A-share fees | Done |
 | BT-V-006 | Financial factor alignment | Done |
 | BT-V-007 | QuantStats report | Done |
 | BT-V-008 | Walk-Forward | Done |
-| BT-N-001 | Daily bar validation | Done (custom + nautilus MVP) |
-| BT-N-002 | CN_A_SHARE venue rules | Partial (custom full; nautilus SIM) |
+| BT-V-009 | Native weekly bars + bar-unit Walk-Forward | Done |
+| BT-V-010 | Shared strategy plugin registry + deterministic kernels | Done |
+| BT-V-011 | Reproducible experiment manifest/artifacts + compare API/UI | Done |
+| BT-N-001 | Daily bar validation | Done (custom); Experimental (nautilus MVP) |
+| BT-N-002 | CN_A_SHARE venue rules | Done (custom); Not implemented (nautilus SIM only) |
 | BT-N-003 | Fee model | Done |
 | BT-N-004 | Slippage | Done (custom) |
 | BT-N-005 | Strategy lifecycle | Partial |
 | BT-N-006 | Anti-lookahead bars | Done |
 | BT-N-007 | Multi-symbol portfolio | Done |
 | BT-N-008 | Performance analysis | Done |
+| BT-N-009 | Weekly close signal / next trading-day open execution | Done (custom validator) |
 
 ## P1 Screening (§6.3)
 
@@ -74,6 +78,7 @@
 | SC-006 | Result persistence | Done |
 | SC-007 | Backtest bridge | Done |
 | SC-008 | Factor IC analysis | Done |
+| SC-009 | Rolling IC windows + point-in-time screening snapshots/audit | Done |
 
 ## P2 Live Trading (§6.4)
 
@@ -90,7 +95,7 @@
 
 | ID | VectorBT | Validation | Status |
 |----|----------|------------|--------|
-| buy_and_hold | Yes | Yes | Done |
+| buy_hold | Yes | Yes | Done |
 | ma_cross | Yes | Yes | Done |
 | pe_momentum | Yes | Yes | Done |
 | screening_rebalance | Yes | Yes | Done |
@@ -105,6 +110,7 @@
 | IC 分析页 | Done |
 | 帮助页 | Done |
 | Walk-Forward UI | Done |
+| 实验中心（列表/详情/双 run 比较） | Done |
 | Windows E2E 文档/脚本 | Done |
 
 ## Web UX 优化（交互体验计划）

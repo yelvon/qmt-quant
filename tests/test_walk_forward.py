@@ -27,3 +27,26 @@ def test_walk_forward_insufficient_data():
     prices = pd.DataFrame({"A": [1, 2, 3]})
     result = run_walk_forward(prices, train_bars=252, test_bars=63)
     assert result.get("error") == "insufficient_data"
+
+
+def test_walk_forward_generic_plugin_continuous_oos_and_isolation():
+    idx = pd.date_range("2021-01-01", periods=180, freq="B")
+    prices = pd.DataFrame({"A": 100 + pd.Series(range(180)).values}, index=idx)
+    result = run_walk_forward(
+        prices,
+        strategy_id="buy_hold",
+        train_bars=60,
+        test_bars=30,
+        step_bars=20,
+        window_type="expanding",
+        purge_bars=3,
+        embargo_bars=2,
+    )
+    assert result["segment_count"] > 1
+    assert result["oos_sharpe"] != 0
+    dates = [row["date"] for row in result["oos_equity_curve"]]
+    assert dates == sorted(set(dates))
+    for segment in result["segments"]:
+        assert segment["train_end"] < segment["test_start"]
+        assert "params" in segment
+        assert "decay_pct" in segment

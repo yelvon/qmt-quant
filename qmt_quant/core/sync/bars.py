@@ -187,18 +187,34 @@ def sync_bars(
         sync_calendar_from_bars()
 
     names_backfilled = 0
-    try:
+    names_skipped = 0
+    skip_names = effective_mode == "incremental" and not settings.sync_name_backfill_on_incremental
+    if skip_names:
         with db_session() as conn:
-            from qmt_quant.storage.instruments import backfill_names_after_sync
+            from qmt_quant.storage.instruments import count_missing_names
 
-            names_backfilled = backfill_names_after_sync(
-                conn,
-                codes,
-                client=client,
-                job_id=job_id,
+            names_skipped = count_missing_names(conn, codes)
+        if job_id and names_skipped:
+            report_job_progress(
+                job_id,
+                0.98,
+                f"增量同步跳过名称补全（{names_skipped} 只待补全，请用数据页「补全股票名称」）",
+                step="export" if settings.auto_export_catalog else "names",
+                detail="名称与 K 线无关，不影响增量更新",
             )
-    except Exception:
-        pass
+    else:
+        try:
+            with db_session() as conn:
+                from qmt_quant.storage.instruments import backfill_names_after_sync
+
+                names_backfilled = backfill_names_after_sync(
+                    conn,
+                    codes,
+                    client=client,
+                    job_id=job_id,
+                )
+        except Exception:
+            pass
 
     result: Dict[str, object] = {
         "sector": sector,
@@ -212,6 +228,8 @@ def sync_bars(
     }
     if names_backfilled:
         result["names_backfilled"] = names_backfilled
+    if names_skipped:
+        result["names_skipped"] = names_skipped
     if range_preset:
         result["range_preset"] = range_preset
 
@@ -236,5 +254,14 @@ def sync_bars(
         )
         if repair_result:
             result["auto_repair"] = repair_result
+
+    if written or result.get("auto_repair"):
+        from qmt_quant.core.catalog.export import clear_price_matrix_cache
+        from qmt_quant.core.data.query import clear_browse_query_cache
+        from qmt_quant.core.sync.check import clear_data_check_cache
+
+        clear_price_matrix_cache()
+        clear_browse_query_cache()
+        clear_data_check_cache()
 
     return result

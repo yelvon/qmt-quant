@@ -4,6 +4,7 @@ import { apiDelete, apiGet, apiPost } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import StatusBadge from "../components/StatusBadge";
 import TechnicalDetails from "../components/TechnicalDetails";
+import EmptyState from "../components/EmptyState";
 import { humanizeError, jobStatusLabel } from "../lib/errorMessages";
 import { jobRouteForType } from "../lib/jobTypes";
 
@@ -97,7 +98,14 @@ export default function JobsPage() {
           {cleaning ? "清理中…" : "清理旧任务（保留最近 30 条）"}
         </button>
       </div>
-      <div className="card overflow-x-auto">
+      {jobs.length === 0 ? (
+        <EmptyState
+          title="还没有任务记录"
+          description="同步数据、策略回测、选股或因子计算任务会显示在这里。"
+          actionLabel="去策略回测"
+          actionTo="/research"
+        />
+      ) : <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-slate-400">
             <tr>
@@ -180,7 +188,7 @@ export default function JobsPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   );
 }

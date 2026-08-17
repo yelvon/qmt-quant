@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
-from qmt_quant.config import get_settings
-from qmt_quant.core.screener.bridge import load_codes_by_run_id
+from qmt_quant.core.backtest.strategy import (
+    STRATEGIES,
+    BacktestResult,
+    CostModel,
+    PortfolioSpec,
+    StrategyContext,
+)
 from qmt_quant.core.validation.venue_cn_a_share import (
     DEFAULT_VENUE,
     FeeConfig,
-    commission,
+    daily_price_limit_ratio,
+    match_buy,
+    match_sell,
     round_lots,
-    stamp_duty,
-    transfer_fee,
 )
 
 
@@ -30,15 +35,7 @@ class Trade:
     fee: float
 
 
-@dataclass
-class ValidationResult:
-    equity_curve: List[Dict[str, float]] = field(default_factory=list)
-    trades: List[Trade] = field(default_factory=list)
-    total_return_pct: float = 0.0
-    max_drawdown_pct: float = 0.0
-    verdict: str = "可以采用"
-    trade_count: int = 0
-    skipped_signals: List[Dict[str, str]] = field(default_factory=list)
+ValidationResult = BacktestResult
 
 
 def parse_signal_side(raw: Any) -> Optional[str]:
@@ -58,6 +55,8 @@ class AShareDailyBacktester:
         prices: pd.DataFrame,
         *,
         ohlcv: pd.DataFrame | None = None,
+        signal_prices: pd.DataFrame | None = None,
+        signal_ohlcv: pd.DataFrame | None = None,
         initial_cash: float | None = None,
         commission_rate: float | None = None,
         stamp_tax_rate: float | None = None,
@@ -67,41 +66,56 @@ class AShareDailyBacktester:
         match_price: str = "next_open",
         enforce_limit: bool = True,
         position_size_pct: float = 0.1,
+        cost_model: CostModel | None = None,
+        portfolio: PortfolioSpec | None = None,
     ) -> None:
-        settings = get_settings()
+        cost_model = cost_model or CostModel.from_settings()
+        portfolio = portfolio or PortfolioSpec.from_settings(
+            initial_cash=initial_cash,
+            position_size_pct=position_size_pct,
+            match_price=match_price,
+            enforce_limit=enforce_limit,
+        )
         self.prices = prices.sort_index()
         self.ohlcv = ohlcv
-        self.dates = list(self.prices.index)
-        self.initial_cash = initial_cash or settings.initial_cash
-        self.fees = FeeConfig(
-            commission_rate=commission_rate or settings.commission_rate,
-            min_commission=min_commission or settings.min_commission,
-            stamp_duty_rate=stamp_tax_rate or settings.stamp_tax_rate,
-            transfer_fee_rate=transfer_fee_rate or settings.transfer_fee_rate,
+        if self.ohlcv is not None and "date" in self.ohlcv.columns:
+            self.ohlcv = self.ohlcv.copy()
+            self.ohlcv["date"] = pd.to_datetime(self.ohlcv["date"])
+            self.ohlcv = self.ohlcv.set_index("date", drop=False).sort_index()
+        self.signal_prices = (
+            signal_prices.sort_index() if signal_prices is not None else self.prices
         )
-        self.slippage_bps = slippage_bps if slippage_bps is not None else settings.slippage_bps
-        self.match_price = match_price
-        self.enforce_limit = enforce_limit
-        self.position_size_pct = min(max(float(position_size_pct), 0.01), 1.0)
+        self.signal_ohlcv = signal_ohlcv if signal_ohlcv is not None else self.ohlcv
+        self.dates = list(self.prices.index)
+        self.initial_cash = portfolio.initial_cash
+        self.fees = FeeConfig(
+            commission_rate=commission_rate if commission_rate is not None else cost_model.commission_rate,
+            min_commission=min_commission if min_commission is not None else cost_model.min_commission,
+            stamp_duty_rate=stamp_tax_rate if stamp_tax_rate is not None else cost_model.stamp_duty_rate,
+            transfer_fee_rate=(
+                transfer_fee_rate if transfer_fee_rate is not None else cost_model.transfer_fee_rate
+            ),
+        )
+        self.slippage_bps = slippage_bps if slippage_bps is not None else cost_model.slippage_bps
+        self.match_price = portfolio.match_price
+        self.enforce_limit = portfolio.enforce_limit
+        self.position_size_pct = min(max(float(portfolio.position_size_pct), 0.01), 1.0)
         self.venue = DEFAULT_VENUE
         self.cash = self.initial_cash
         self.positions: Dict[str, int] = {}
         self.buy_dates: Dict[str, pd.Timestamp] = {}
         self.trades: List[Trade] = []
         self.equity: List[Dict[str, float]] = []
+        self.skipped_signals: List[Dict[str, str]] = []
+        self.selection_audit: List[Dict[str, Any]] = []
 
     def run_ma_cross(self, short_window: int, long_window: int) -> ValidationResult:
-        signal = pd.DataFrame(index=self.prices.index, columns=self.prices.columns, dtype=float)
-        for code in self.prices.columns:
-            s = self.prices[code]
-            fast = s.rolling(short_window).mean()
-            slow = s.rolling(long_window).mean()
-            signal[code] = (fast > slow).astype(float)
-        return self._run_signal_loop(signal)
+        return self.run_strategy(
+            "ma_cross", {"short_window": short_window, "long_window": long_window}
+        )
 
     def run_buy_hold(self) -> ValidationResult:
-        signal = pd.DataFrame(1.0, index=self.prices.index, columns=self.prices.columns)
-        return self._run_signal_loop(signal, hold_only=True)
+        return self.run_strategy("buy_hold")
 
     def run_pe_momentum(
         self,
@@ -109,14 +123,10 @@ class AShareDailyBacktester:
         pe_threshold: float = 30,
         momentum_window: int = 20,
     ) -> ValidationResult:
-        from qmt_quant.core.research.factors import load_pe_matrix
-        from qmt_quant.storage.database import db_session
-
-        with db_session() as conn:
-            pe_mat = load_pe_matrix(conn, self.prices.index, list(self.prices.columns))
-        mom = self.prices.pct_change(momentum_window)
-        signal = ((pe_mat <= pe_threshold) & (mom > 0)).astype(float)
-        return self._run_signal_loop(signal)
+        return self.run_strategy(
+            "pe_momentum",
+            {"pe_threshold": pe_threshold, "momentum_window": momentum_window},
+        )
 
     def run_screening_rebalance(
         self,
@@ -124,18 +134,61 @@ class AShareDailyBacktester:
         *,
         rebalance_days: int = 20,
     ) -> ValidationResult:
-        codes = load_codes_by_run_id(screen_run_id) if screen_run_id else []
-        if not codes:
-            return ValidationResult(verdict="建议复核")
-        signal = pd.DataFrame(0.0, index=self.prices.index, columns=self.prices.columns)
-        valid = [c for c in codes if c in signal.columns]
-        if not valid:
-            return ValidationResult(verdict="建议复核")
-        for i in range(0, len(self.dates), rebalance_days):
-            dt = self.dates[i]
-            for c in valid:
-                signal.loc[dt:, c] = 1.0
-        return self._run_signal_loop(signal)
+        return self.run_strategy(
+            "screening_rebalance",
+            {"screen_run_id": screen_run_id, "rebalance_days": rebalance_days},
+        )
+
+    def run_strategy(
+        self,
+        strategy_id: str,
+        params: Dict[str, Any] | None = None,
+        *,
+        metadata: Dict[str, Any] | None = None,
+    ) -> BacktestResult:
+        plugin = STRATEGIES.get(strategy_id)
+        runtime_metadata = dict(metadata or {})
+        runtime_metadata["selection_audit"] = self.selection_audit
+        context = StrategyContext(
+            prices=self.signal_prices,
+            ohlcv=self.signal_ohlcv,
+            cost_model=CostModel(
+                commission_rate=self.fees.commission_rate,
+                min_commission=self.fees.min_commission,
+                stamp_duty_rate=self.fees.stamp_duty_rate,
+                transfer_fee_rate=self.fees.transfer_fee_rate,
+                slippage_bps=self.slippage_bps,
+            ),
+            portfolio=PortfolioSpec(
+                initial_cash=self.initial_cash,
+                position_size_pct=self.position_size_pct,
+                match_price=self.match_price,
+                enforce_limit=self.enforce_limit,
+            ),
+            metadata=runtime_metadata,
+        )
+        try:
+            signal = plugin.signal(context, params or {})
+        except ValueError as exc:
+            return BacktestResult(
+                verdict="建议复核",
+                skipped_signals=[{"date": "", "code": "", "reason": str(exc)}],
+            )
+        return self._run_signal_loop(
+            self._expand_signal_to_execution_calendar(signal),
+            hold_only=bool(getattr(plugin, "hold_only", False)),
+            include_first_bar=bool(getattr(plugin, "include_first_bar", False)),
+        )
+
+    def _expand_signal_to_execution_calendar(self, signal: pd.DataFrame) -> pd.DataFrame:
+        """Expose a completed signal bar only from its actual close date onward."""
+        signal = signal.reindex(columns=self.prices.columns).sort_index()
+        if signal.index.equals(self.prices.index):
+            return signal
+        # Weekly labels are actual last trading dates. Reindexing then forward
+        # filling makes the new state visible at that day's close; the existing
+        # next_open loop executes it on the next daily row.
+        return signal.reindex(self.prices.index).ffill().fillna(0.0)
 
     def run_signals(self, signals: list | None) -> ValidationResult:
         """Replay explicit buy/sell dates on the first price column (single-stock)."""
@@ -174,23 +227,22 @@ class AShareDailyBacktester:
         hold_only: bool = False,
         include_first_bar: bool = False,
     ) -> ValidationResult:
-        for i, dt in enumerate(self.dates):
-            if i == 0 and not include_first_bar:
-                self._record_equity(dt)
+        for exec_idx, exec_date in enumerate(self.dates):
+            signal_idx = exec_idx if self.match_price == "close" else exec_idx - 1
+            if signal_idx < 0 or (signal_idx == 0 and not include_first_bar):
+                self._record_equity(exec_date)
                 continue
-            exec_idx = self._exec_index(i)
-            if exec_idx is None:
-                self._record_equity(dt)
-                continue
-            exec_date = self.dates[exec_idx]
             for code in self.prices.columns:
-                prev_sig = 0.0 if i == 0 else signal.iloc[i - 1][code]
-                curr_sig = signal.iloc[i][code]
+                prev_sig = 0.0 if signal_idx == 0 else signal.iloc[signal_idx - 1][code]
+                curr_sig = signal.iloc[signal_idx][code]
                 exec_price = self._exec_price(code, exec_idx)
                 if exec_price is None or exec_price <= 0:
                     continue
                 pos = self.positions.get(code, 0)
                 if prev_sig <= 0 and curr_sig > 0 and pos == 0:
+                    if self._is_suspended(code, exec_idx):
+                        self._skip(exec_date, code, "suspended_volume_zero")
+                        continue
                     if self._limit_blocks_buy(code, exec_idx):
                         continue
                     qty = round_lots(
@@ -199,9 +251,12 @@ class AShareDailyBacktester:
                     if qty >= self.venue.lot_size:
                         self._buy(exec_date, code, exec_price, qty)
                 elif not hold_only and prev_sig > 0 and curr_sig <= 0 and pos > 0:
-                    if self._can_sell(code, dt) and not self._limit_blocks_sell(code, exec_idx):
+                    if self._is_suspended(code, exec_idx):
+                        self._skip(exec_date, code, "suspended_volume_zero")
+                        continue
+                    if self._can_sell(code, exec_date) and not self._limit_blocks_sell(code, exec_idx):
                         self._sell(exec_date, code, exec_price, pos)
-            self._record_equity(dt)
+            self._record_equity(exec_date)
         return self._build_result()
 
     def _exec_index(self, signal_idx: int) -> int | None:
@@ -231,6 +286,30 @@ class AShareDailyBacktester:
             return price * (1 + slip)
         return price * (1 - slip)
 
+    def _is_suspended(self, code: str, exec_idx: int) -> bool:
+        if self.ohlcv is None:
+            return False
+        dt = self.dates[exec_idx]
+        try:
+            rows = self.ohlcv[
+                (self.ohlcv["code"] == code)
+                & (
+                    (self.ohlcv["date"] == dt.strftime("%Y-%m-%d"))
+                    | (self.ohlcv.index == dt)
+                )
+            ]
+            if rows.empty or "volume" not in rows.columns:
+                return False
+            volume = rows.iloc[0].get("volume")
+            return volume is not None and not pd.isna(volume) and float(volume) <= 0
+        except (KeyError, TypeError, AttributeError, ValueError):
+            return False
+
+    def _skip(self, dt: pd.Timestamp, code: str, reason: str) -> None:
+        self.skipped_signals.append(
+            {"date": dt.strftime("%Y-%m-%d"), "code": code, "reason": reason}
+        )
+
     def _limit_blocks_buy(self, code: str, exec_idx: int) -> bool:
         if not self.enforce_limit or self.ohlcv is None:
             return False
@@ -245,7 +324,10 @@ class AShareDailyBacktester:
         pre, high = self._pre_close_high(code, exec_idx)
         if pre is None or high is None or pre <= 0:
             return False
-        limit = pre * 1.1 if not code.startswith("3") else pre * 1.2
+        ratio = daily_price_limit_ratio(
+            code, self.dates[exec_idx].strftime("%Y-%m-%d"), is_st=self._bar_is_st(code, exec_idx)
+        )
+        limit = pre * (1 + ratio)
         return high >= limit * 0.999
 
     def _at_limit_down(self, code: str, exec_idx: int) -> bool:
@@ -253,8 +335,29 @@ class AShareDailyBacktester:
         low = self._bar_low(code, exec_idx)
         if pre is None or low is None or pre <= 0:
             return False
-        limit = pre * 0.9 if not code.startswith("3") else pre * 0.8
+        ratio = daily_price_limit_ratio(
+            code, self.dates[exec_idx].strftime("%Y-%m-%d"), is_st=self._bar_is_st(code, exec_idx)
+        )
+        limit = pre * (1 - ratio)
         return low <= limit * 1.001
+
+    def _bar_is_st(self, code: str, exec_idx: int) -> bool:
+        if self.ohlcv is None:
+            return False
+        dt = self.dates[exec_idx]
+        try:
+            rows = self.ohlcv[
+                (self.ohlcv["code"] == code)
+                & ((self.ohlcv["date"] == dt.strftime("%Y-%m-%d")) | (self.ohlcv.index == dt))
+            ]
+            if rows.empty:
+                return False
+            row = rows.iloc[0]
+            if "is_st" in row and not pd.isna(row["is_st"]):
+                return bool(row["is_st"])
+            return "ST" in str(row.get("name") or "").upper()
+        except (KeyError, TypeError, AttributeError):
+            return False
 
     def _pre_close_high(self, code: str, exec_idx: int) -> tuple[float | None, float | None]:
         dt = self.dates[exec_idx]
@@ -281,31 +384,50 @@ class AShareDailyBacktester:
 
     def _buy(self, dt: pd.Timestamp, code: str, price: float, qty: int) -> None:
         price = self._apply_slippage(price, "buy")
-        amount = price * qty
-        comm = commission(amount, self.fees)
-        xfer = transfer_fee(amount, code, self.fees)
-        fee = comm + xfer
-        if self.cash < amount + fee:
+        fill = match_buy(
+            cash=self.cash,
+            budget=price * qty,
+            price=price,
+            code=code,
+            fees=self.fees,
+            lot_size=self.venue.lot_size,
+        )
+        if fill is None:
             return
-        self.cash -= amount + fee
-        self.positions[code] = self.positions.get(code, 0) + qty
+        self.cash += fill.cash_delta
+        self.positions[code] = self.positions.get(code, 0) + fill.quantity
         self.buy_dates[code] = dt
         self.trades.append(
-            Trade(dt.strftime("%Y-%m-%d"), code, "买入", round(price, 4), qty, round(fee, 2))
+            Trade(
+                dt.strftime("%Y-%m-%d"),
+                code,
+                "买入",
+                round(price, 4),
+                fill.quantity,
+                round(fill.fee, 2),
+            )
         )
 
     def _sell(self, dt: pd.Timestamp, code: str, price: float, qty: int) -> None:
         price = self._apply_slippage(price, "sell")
-        amount = price * qty
-        comm = commission(amount, self.fees)
-        tax = stamp_duty(amount, self.fees)
-        xfer = transfer_fee(amount, code, self.fees)
-        fee = comm + tax + xfer
-        self.cash += amount - fee
-        self.positions[code] = 0
+        available = self.positions.get(code, 0)
+        fill = match_sell(
+            available=available, quantity=qty, price=price, code=code, fees=self.fees
+        )
+        if fill is None:
+            return
+        self.cash += fill.cash_delta
+        self.positions[code] = available - fill.quantity
         self.buy_dates.pop(code, None)
         self.trades.append(
-            Trade(dt.strftime("%Y-%m-%d"), code, "卖出", round(price, 4), qty, round(fee, 2))
+            Trade(
+                dt.strftime("%Y-%m-%d"),
+                code,
+                "卖出",
+                round(price, 4),
+                fill.quantity,
+                round(fill.fee, 2),
+            )
         )
 
     def _can_sell(self, code: str, dt: pd.Timestamp) -> bool:
@@ -326,6 +448,9 @@ class AShareDailyBacktester:
             {
                 "date": dt.strftime("%Y-%m-%d"),
                 "equity": round(total / self.initial_cash * 100, 2),
+                "cash": round(self.cash, 8),
+                "market_value": round(mv, 8),
+                "equity_value": round(total, 8),
             }
         )
 
@@ -351,4 +476,6 @@ class AShareDailyBacktester:
             max_drawdown_pct=round(max_dd * 100, 2),
             verdict=verdict,
             trade_count=len(self.trades),
+            skipped_signals=self.skipped_signals,
+            selection_audit=self.selection_audit,
         )

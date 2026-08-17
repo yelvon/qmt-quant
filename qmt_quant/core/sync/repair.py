@@ -262,6 +262,14 @@ def sync_bars_repair(
         from qmt_quant.core.catalog.export import export_catalog
 
         result["catalog"] = export_catalog(adjust_type=adjust_type, codes=codes)
+    if written:
+        from qmt_quant.core.catalog.export import clear_price_matrix_cache
+        from qmt_quant.core.data.query import clear_browse_query_cache
+        from qmt_quant.core.sync.check import clear_data_check_cache
+
+        clear_price_matrix_cache()
+        clear_browse_query_cache()
+        clear_data_check_cache()
     return result
 
 

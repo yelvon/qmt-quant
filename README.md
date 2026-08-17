@@ -9,11 +9,11 @@
 | ① 总览 | 环境/数据状态、一键跑通 ②→③→④ |
 | ② 准备数据 | QMT 同步日线/财报、导出 Parquet |
 | 数据浏览 | 横截面/时间序列表格、日 K 线（`/data/browse`） |
-| ③ 快速试策略 | VectorBT 参数扫描（双均线 / 低PE动量 / 选股调仓） |
-| ④ 仔细验策略 | 自研 A 股验证器（T+1/滑点/涨跌停）+ 与 ③ 对比 |
-| ⑤ 选股 | 模板 + 可视化条件 + YAML 规则 |
+| ③ 快速试策略 | 日/周线参数扫描（双均线 / 低PE动量 / 选股调仓） |
+| ④ 仔细验策略 | 统一 A 股规则内核（T+1/滑点/涨跌停）+ 与 ③ 对比 |
+| ⑤ 实验中心 | 浏览实验产物、指标与诊断，对比两次 run |
+| ⑥ 选股 / 实盘高级 | 点时滚动选股、因子 IC、模拟/实盘 |
 | 因子 IC | 因子与未来收益相关性分析 |
-| ⑥ 实盘 | xttrader 连接，默认 dry_run |
 | 帮助 | VectorBT / 验证器 / 双环境说明 |
 | 设置 / 任务记录 | QMT 路径、环境 Python、任务历史 |
 
@@ -151,10 +151,10 @@ python -m qmt_quant.cli serve api
 |------|------|--------|
 | ① 总览 | `/` | 环境/数据状态、今日建议、**一键跑通**（②→③→④） |
 | ② 准备数据 | `/data` | 从 QMT 同步股票池、日线、财报，导出 Parquet |
-| ③ 快速试策略 | `/research` | VectorBT 参数扫描（双均线 / 低PE动量等） |
-| ④ 仔细验策略 | `/validation` | A 股规则验证回测，与 ③ 结果对比 |
-| ⑤ 选股 | `/screening` | 模板选股、YAML 规则、选股结果回测 |
-| ⑥ 实盘 | `/live` | 连接 xttrader，默认 **模拟下单**（dry_run） |
+| ③ 快速试策略 | `/research` | 日/周线参数扫描与 Walk-Forward |
+| ④ 仔细验策略 | `/validation` | 统一 A 股规则验证回测，与 ③ 结果对比 |
+| ⑤ 实验中心 | `/experiments` | 浏览 run 产物、完整指标/诊断并比较两次实验 |
+| ⑥ 选股 / 实盘高级 | `/screening`、`/live` | 点时滚动选股、YAML/IC；xttrader 默认 **模拟下单** |
 
 辅助页面：
 
@@ -172,7 +172,8 @@ python -m qmt_quant.cli serve api
 2. **准备数据**（`/data`）— 选择板块与范围（建议「全量 3 年」），点击同步；需 **QMT 已登录**。
 3. **快速试策略**（`/research`）— 选策略模板与时间范围，提交后等待任务完成，查看收益曲线与指标。
 4. **仔细验策略**（`/validation`）— 基于研究 run 做 A 股规则验证，对比 VectorBT 与验证器差异。
-5. **选股 / 实盘**（可选）— 在 ⑤ 跑选股模板；在 ⑥ 预览并提交订单（默认模拟，真仓需显式确认）。
+5. **实验中心**（`/experiments`）— 查看 manifest、数据指纹、指标与诊断；选择两个 run 比较参数和结果。
+6. **选股 / 实盘高级**（可选）— 选股历史回测按调仓日滚动重算快照；实盘订单默认模拟，真仓需显式确认。
 
 首页 **「一键跑通」** 会自动串联：数据检查 → 研究 → 验证，适合快速体验全流程。
 
@@ -228,7 +229,7 @@ data:
 | 页面打不开 / 一直加载 | 确认两个终端（或启动脚本弹出的 API、前端窗口）都在运行；执行 `.\scripts\start.ps1 -Stop` 或 `./scripts/start.sh --stop` 后重新启动 |
 | 脚本提示启动失败 | 查看 `logs/api.log`、`logs/web.log` 及弹出的 PowerShell 窗口；确认 Node.js / Python 路径正确 |
 | 接口报错 / 502 | 后端 API 未启动或 8788 被占用；检查 API 窗口日志 |
-| 数据同步失败 | QMT 客户端是否已登录；`设置` 页 doctor 是否全部通过；若报 `database is locked`，重启服务后再试（勿同时开多个 API 进程） |
+| 数据同步失败 | QMT 客户端是否已登录；`设置` 页 doctor 是否全部通过；再到任务记录和 API 日志查看 PostgreSQL/QMT 原始错误 |
 | 查看运行日志 | 见下方「日志位置」 |
 
 ### 日志位置
@@ -261,10 +262,8 @@ python -m qmt_quant.cli sync check --repair
 python -m qmt_quant.cli sync repair
 python -m qmt_quant.cli sync financial
 python -m qmt_quant.cli sync financial --full
-python -m qmt_quant.cli sync financial
 python -m qmt_quant.cli sync universe
 python -m qmt_quant.cli catalog export --fmt both
-python -m qmt_quant.cli sync check
 python -m qmt_quant.cli data query --table daily_bar --view-mode series --code 600519.SH --from 2024-01-01 --to 2024-06-30 --adjust front
 python -m qmt_quant.cli data kline --code 600519.SH --from 2024-01-01 --to 2024-06-30
 
@@ -287,6 +286,13 @@ python -m qmt_quant.cli trade submit --codes 600519.SH --live --confirm LIVE
 # 一键流水线
 python -m qmt_quant.cli pipeline
 ```
+
+CLI 的真实边界：
+
+- CLI 可运行数据同步/检查/修复、Catalog 导出、研究、Walk-Forward、验证、选股/IC、交易和 pipeline；`research run` / `validate run` 当前没有周线选项，日/周线选择由 Web job/API 提供。
+- 实验中心当前没有 `experiment` CLI；请使用 `/experiments`，其数据来自 `backtest_run` 与 `reports/<run_id>/`。
+- `screen backtest --engine` 仅接受 `vectorbt|validate`，不是 `nautilus`；历史 `screening_rebalance` 必须使用调仓日点时快照，不能把单次选股结果静态套用整个历史。
+- `validate run --engine nautilus` 是显式实验入口，仅支持 `ma_cross`、日线、最多 10 标的和 SIM 简化撮合。缺依赖、Catalog 或能力不支持时直接失败，绝不回退默认引擎。
 
 ## 目录结构
 
@@ -319,11 +325,16 @@ qmt-quant/
 
 ```powershell
 pip install -e ".[quant,web,dev]"
+$env:DATABASE_URL = "postgresql://qmt:qmt@localhost:5432/qmt_quant_test"
 pytest
+# 默认排除的代表性性能基线
+pytest -m performance
 ```
 
-GitHub Actions 在 push/PR 时自动运行 pytest（Linux，无需 QMT）。
+> **警告：本地测试会清数据。** `tests/conftest.py` 的数据库 fixture 会迁移并 `TRUNCATE ... CASCADE` `DATABASE_URL` 指向的数据库。不要指向开发库或生产库；推荐单独创建 `qmt_quant_test`。默认 `pytest` 通过 `pyproject.toml` 排除 `performance` marker，只有显式 `pytest -m performance` 才运行 300 标的/10 年等代表性基线。
+
+GitHub Actions 在 push/PR 时自动运行普通 pytest（Linux，无需 QMT）。
 
 ## 验证层说明
 
-默认使用自研 `AShareDailyBacktester`（`validation_engine: custom`）。可选 **NautilusTrader MVP**（`validation_engine: nautilus` 或 `--engine nautilus`），详见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)。
+默认使用统一 A 股规则内核 `AShareDailyBacktester`（`validation_engine: custom`），研究与验证共用 `core/backtest/strategy.py` 的策略插件。可选 **NautilusTrader 实验 MVP**（显式 `validation_engine: nautilus` 或 `--engine nautilus`），不具备生产级 A 股规则且不 fallback，详见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)。

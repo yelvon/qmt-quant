@@ -50,7 +50,7 @@ from qmt_quant.core.trade.service import (
 from qmt_quant.core.validation.engine import validation_engine_display_name
 from qmt_quant.web.status_helpers import build_status_actions, has_strategy_run
 from qmt_quant.storage.database import db_session, run_migrations
-from qmt_quant.storage.jobs import get_backtest_run, list_jobs
+from qmt_quant.storage.jobs import get_backtest_run, list_backtest_runs, list_jobs
 from qmt_quant.web.auth import require_api_token
 
 
@@ -83,8 +83,16 @@ class WalkForwardBody(BaseModel):
     train_months: int = 12
     test_months: int = 3
     code: Optional[str] = None
-    sample: str = "head"
-    universe_n: int = 50
+    sample: str = "all"
+    universe_n: Optional[int] = None
+    bar_frequency: str = "daily"
+    train_bars: Optional[int] = None
+    test_bars: Optional[int] = None
+    step_bars: Optional[int] = None
+    window_type: str = "rolling"
+    purge_bars: int = 0
+    embargo_bars: int = 0
+    strategy_params: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SignalItem(BaseModel):
@@ -95,6 +103,9 @@ class SignalItem(BaseModel):
 class ScreenIcBody(BaseModel):
     template: str = "low_pe"
     sector: str = "沪深A股"
+    horizons: List[int] = Field(default_factory=lambda: [5, 20])
+    frequency: str = "daily"
+    quantiles: int = 5
 
 
 class SyncFinancialBody(BaseModel):
@@ -130,9 +141,10 @@ class ResearchBody(BaseModel):
     fee_preset: str = "default"
     screen_run_id: Optional[str] = None
     code: Optional[str] = None
-    sample: str = "head"
-    universe_n: int = 50
+    sample: str = "all"
+    universe_n: Optional[int] = None
     signals: Optional[List[SignalItem]] = None
+    bar_frequency: str = "daily"
 
 
 class ValidateBody(BaseModel):
@@ -146,6 +158,7 @@ class ValidateBody(BaseModel):
     code: Optional[str] = None
     engine: Optional[str] = None
     signals: Optional[List[SignalItem]] = None
+    bar_frequency: Optional[str] = None
 
 
 class BacktestBody(BaseModel):
@@ -159,9 +172,10 @@ class BacktestBody(BaseModel):
     benchmark: str = "hs300"
     screen_run_id: Optional[str] = None
     code: Optional[str] = None
-    sample: str = "head"
-    universe_n: int = 50
+    sample: str = "all"
+    universe_n: Optional[int] = None
     signals: Optional[List[SignalItem]] = None
+    bar_frequency: str = "daily"
 
 
 class ScreenBody(BaseModel):
@@ -269,7 +283,7 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def api_token_guard(request, call_next):
-        if request.method in ("POST", "PUT") and request.url.path.startswith("/api/"):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path.startswith("/api/"):
             try:
                 require_api_token(request)
             except HTTPException as exc:
@@ -595,8 +609,9 @@ def create_app() -> FastAPI:
                 "fee_preset": body.fee_preset,
                 "screen_run_id": body.screen_run_id,
                 "codes": codes,
-                "sample": body.sample or "head",
+                "sample": body.sample or "all",
                 "universe_n": body.universe_n,
+                "bar_frequency": body.bar_frequency,
             },
         )
         return {"job_id": job_id}
@@ -614,11 +629,19 @@ def create_app() -> FastAPI:
                 "range_preset": body.range_preset,
                 "short_preset": body.short_preset,
                 "long_preset": body.long_preset,
-                "train_bars": body.train_months * 21,
-                "test_bars": body.test_months * 21,
+                "train_bars": body.train_bars
+                or body.train_months * (4 if body.bar_frequency == "weekly" else 21),
+                "test_bars": body.test_bars
+                or body.test_months * (4 if body.bar_frequency == "weekly" else 21),
+                "step_bars": body.step_bars,
                 "codes": codes,
-                "sample": body.sample or "head",
+                "sample": body.sample or "all",
                 "universe_n": body.universe_n,
+                "bar_frequency": body.bar_frequency,
+                "window_type": body.window_type,
+                "purge_bars": body.purge_bars,
+                "embargo_bars": body.embargo_bars,
+                "strategy_params": body.strategy_params,
             },
         )
         return {"job_id": job_id}
@@ -640,6 +663,43 @@ def create_app() -> FastAPI:
                 detail = {}
         return {"run": run, "detail": detail}
 
+    def _experiment_payload(run_id: str) -> Dict[str, Any]:
+        with db_session() as conn:
+            run = get_backtest_run(conn, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="not_found")
+        detail: Dict[str, Any] = {}
+        path = run.get("result_path")
+        if path:
+            try:
+                from pathlib import Path
+
+                detail = json.loads(Path(path).read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                detail = {}
+        return {"run": run, "detail": detail}
+
+    @app.get("/api/experiments")
+    def api_experiments(limit: int = 50, run_kind: Optional[str] = None) -> Dict[str, Any]:
+        with db_session() as conn:
+            rows = list_backtest_runs(conn, limit=limit, run_kind=run_kind)
+        return {"items": rows}
+
+    @app.get("/api/experiments/compare")
+    def api_compare_experiments(left: str, right: str) -> Dict[str, Any]:
+        lhs, rhs = _experiment_payload(left), _experiment_payload(right)
+        lm, rm = lhs["run"].get("metrics") or {}, rhs["run"].get("metrics") or {}
+        keys = sorted(set(lm) | set(rm))
+        delta: Dict[str, Any] = {}
+        for key in keys:
+            lv, rv = lm.get(key), rm.get(key)
+            delta[key] = rv - lv if isinstance(lv, (int, float)) and isinstance(rv, (int, float)) else None
+        return {"left": lhs, "right": rhs, "metric_delta": delta}
+
+    @app.get("/api/experiments/{run_id}")
+    def api_experiment(run_id: str) -> Dict[str, Any]:
+        return _experiment_payload(run_id)
+
     @app.post("/api/jobs/backtest")
     def job_backtest(body: BacktestBody) -> Dict[str, str]:
         codes = _body_codes(body.code)
@@ -658,9 +718,10 @@ def create_app() -> FastAPI:
                 "benchmark": body.benchmark,
                 "screen_run_id": body.screen_run_id,
                 "codes": codes,
-                "sample": body.sample or "head",
+                "sample": body.sample or "all",
                 "universe_n": body.universe_n,
                 "signals": _body_signals(body.signals),
+                "bar_frequency": body.bar_frequency,
             },
         )
         return {"job_id": job_id}
@@ -683,6 +744,7 @@ def create_app() -> FastAPI:
                 "codes": codes,
                 "engine": body.engine,
                 "signals": _body_signals(body.signals),
+                "bar_frequency": body.bar_frequency,
             },
         )
         return {"job_id": job_id}
@@ -736,7 +798,13 @@ def create_app() -> FastAPI:
             display_name="因子 IC 分析",
             job_type="screen_ic",
             env="quant",
-            params={"template_id": body.template, "sector": body.sector},
+            params={
+                "template_id": body.template,
+                "sector": body.sector,
+                "horizons": body.horizons,
+                "frequency": body.frequency,
+                "quantiles": body.quantiles,
+            },
         )
         return {"job_id": job_id}
 
@@ -866,16 +934,17 @@ def create_app() -> FastAPI:
     def options_research_universe(
         sector: str = "沪深A股",
         strategy: str = "ma_cross",
-        sample: str = "head",
-        universe_n: int = 50,
+        sample: str = "all",
+        universe_n: Optional[int] = None,
         range_preset: str = "3y",
     ) -> Dict[str, Any]:
-        _start, end = resolve_range_preset(range_preset)
+        start, end = resolve_range_preset(range_preset)
         return describe_research_universe(
             sector=sector,
             strategy_id=strategy,
             sample=sample,
             universe_n=universe_n,
+            range_start=start,
             range_end=end,
         )
 

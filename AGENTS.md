@@ -9,12 +9,12 @@
 ## 1. 项目是什么
 
 - **qmt-quant**：基于迅投 **QMT / xtquant** 的 **Windows 本机**量化工作台（单用户）。
-- **主链路**：同步数据 → VectorBT 快速研究 → 自研 A 股验证器 → 选股 → 模拟/实盘。
+- **主链路**：同步数据 → 快速研究 → 统一 A 股内核验证 → 实验中心比较 → 选股 → 模拟/实盘。
 - **双 Python 环境**（硬约束）：
   - **qmt-env**（3.8–3.11 + xtquant）：数据同步、xttrader 实盘
   - **quant-env**（3.12+）：VectorBT、Polars、FastAPI、回测/选股/Web
   - 数据交换：**PostgreSQL** + **Parquet**（`data/`），两环境互不污染依赖。
-- **验证层**：默认自研 `AShareDailyBacktester`（`custom_validator`）；**Phase 7 MVP 已启动** — 可选 `nautilus_trader` 引擎 + NT Parquet Catalog（见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)）。
+- **统一内核**：`core/backtest/` 提供策略注册、成本/组合配置、实验产物；research 与 custom validation 共用 `STRATEGIES` 信号插件和 A 股撮合语义。Nautilus 仅为显式选择的实验引擎，能力不足或依赖缺失时直接报错，**绝不 fallback**（见 [docs/phase7-nautilus.md](./docs/phase7-nautilus.md)）。
 - **实盘默认 dry_run**；真实下单须 CLI `--confirm LIVE` 或 Web 二次确认。
 
 权威需求：[docs/需求文档.md](./docs/需求文档.md)（v0.3）  
@@ -56,15 +56,18 @@ qmt-quant/
     progress.md             ← 需求进度
     CHANGELOG.md            ← 变更记录
     UI设计稿.md
-  migrations/               ← PostgreSQL 迁移（001_init.sql）
+  migrations/               ← PostgreSQL 迁移（按编号顺序执行）
   qmt_quant/
     adapters/qmt/           ← xtdata / xttrader（qmt-env）
     core/
+      backtest/             ← 统一策略注册、计算内核、实验指标/产物
+      data/                 ← 日/周频率与聚合
       sync/                 ← 数据同步
       catalog/              ← DB → Parquet
       research/             ← VectorBT 研究
-      validation/           ← AShareDailyBacktester + ValidationEngine
-      screener/             ← 选股 DSL / IC / bridge
+      validation/           ← AShareDailyBacktester + 引擎工厂；Nautilus 实验适配
+      screener/             ← 选股 DSL / rolling IC / 点时快照 / bridge
+      universe.py           ← 共用点时股票池
       trade/                ← 实盘 dry_run / 风控
       jobs/                 ← 任务调度（含跨环境 subprocess）
     storage/                ← PostgreSQL 仓储（psycopg）
@@ -72,7 +75,7 @@ qmt-quant/
     web/                    ← FastAPI
   strategies/
     vectorbt/               ← 研究策略参考
-    nautilus/               ← Phase 7 占位
+    nautilus/               ← Nautilus 实验策略
     rules/                  ← 选股 YAML
   web/                      ← React + Vite 前端
   tests/
@@ -111,6 +114,8 @@ python -m qmt_quant.cli serve api
 | `python.qmt_env` / `python.quant_env` | 两环境 Python 可执行文件路径 |
 | `jobs.inline` | `false` 时 qmt 类 job 通过 subprocess 切到 qmt-env |
 | `data.db_url` / `data.parquet_catalog_dir` | PostgreSQL DSN 与 Parquet 目录 |
+| `data.catalog_nt_dir` / `data.export_nt_catalog` | Nautilus 实验 Catalog 与是否附加导出 |
+| `data.sync.name_backfill_on_incremental` / `concurrency` | 增量名称补全（默认关）/ QMT 同步并发（默认 1） |
 | `web.api_token` | 可选 Bearer Token（保护 POST/PUT API） |
 | `trade.dry_run` | 默认模拟下单 |
 | `qmt.userdata_path` / `qmt.account_id` | xttrader 实盘 |
@@ -125,9 +130,10 @@ python -m qmt_quant.cli serve api
 |----|------|--------|
 | `adapters/qmt/` | xtquant 封装 | 业务编排、Web 逻辑 |
 | `core/sync/` | 拉数、质量检查 | 回测计算 |
-| `core/research/` | VectorBT 扫描、报告 | 直接写 DB schema |
-| `core/validation/` | 高保真日频验证 | 绕过 ValidationEngine 工厂 |
-| `core/screener/` | 选股、DSL、IC、bridge | 伪造财务数据（禁止 hash PE/ROE） |
+| `core/backtest/` | 策略插件、共享配置/内核、实验产物 | 引入 Web 或 QMT 适配逻辑 |
+| `core/research/` | 参数扫描、Walk-Forward、报告 | 复制策略注册或 A 股规则 |
+| `core/validation/` | 统一 A 股验证；Nautilus 实验适配 | 静默切换引擎 |
+| `core/screener/` | 选股、DSL、rolling IC、点时快照、bridge | 用当前选股结果贯穿历史 |
 | `core/trade/` | 下单、风控 | 默认 live 下单 |
 | `storage/` | 表读写、迁移 | 调用 xtquant |
 | `cli/` | 命令入口 | 复杂 UI |
@@ -140,7 +146,7 @@ python -m qmt_quant.cli serve api
 2. 领域逻辑 → `core/<domain>/`
 3. CLI → `cli/main.py`
 4. API → `web/app.py` + 前端 `web/src/lib/api.ts`
-5. 策略 → `strategies/` + runner 注册
+5. 策略 → 实现 `StrategyPlugin` 并在 `core/backtest/strategy.py` 注册；research/Walk-Forward/custom validation 自动按同一 `strategy_id` 解析；Nautilus 支持须另行显式实现
 6. 测试 → `tests/test_<domain>.py`
 7. **变更记录** → §2 表格
 
@@ -148,15 +154,19 @@ python -m qmt_quant.cli serve api
 
 ## 6. 内置策略与引擎
 
-| strategy_id | 研究 (VectorBT) | 验证 (custom) | 说明 |
-|-------------|-----------------|---------------|------|
-| `ma_cross` | ✓ | ✓ | 双均线参数扫描 |
-| `buy_hold` | ✓ | ✓ | 基准 |
-| `pe_momentum` | ✓ | ✓ | 财报按 `announce_date` 对齐 |
-| `screening_rebalance` | ✓ | ✓ | 需 `screen_run_id` |
+| strategy_id | 研究 | Custom 验证 | Nautilus 实验 | 说明 |
+|-------------|------|-------------|---------------|------|
+| `ma_cross` | ✓ | ✓ | MVP | 双均线参数扫描 |
+| `buy_hold` | ✓ | ✓ | — | 基准（策略 ID 不是 `buy_and_hold`） |
+| `pe_momentum` | ✓ | ✓ | — | 财报按 `announce_date` 对齐 |
+| `screening_rebalance` | ✓ | ✓ | — | 历史回测必须用 rolling 点时快照 |
 
-- 研究层默认最多 **50 只股票**（性能）；`screening_rebalance` 用选股结果不受此限。
-- 验证层：`get_validation_engine("custom")`；`"nautilus"` 尚未实现。
+- `core/backtest/runner.py` 是一键「研究 → custom 验证」入口；插件真源为 `core/backtest/strategy.py`，不要在各 runner 维护分叉策略表。
+- 日/周线统一由 `core/data/frequency.py` 处理；周线在实际周末收盘确认信号，下一实际交易日开盘执行，不能把周线索引直接当成交日。
+- 研究层默认使用确定性完整股票池；仅显式指定 `universe_n` 时抽样，流动性排序只用回测期初数据。
+- `screening_rebalance` 不接受单次静态 `screen_run_id` 贯穿历史；使用 `SelectionSnapshotProvider` / `RuleSelectionSnapshotProvider` 在每个调仓日按当时可见数据生成快照并保留 audit。
+- 实验中心数据来自 `backtest_run` 与 `reports/<run_id>/` 的 manifest/detail/equity/trades/positions；当前 Web/API 支持浏览和两次 run 比较，**没有独立实验 CLI**。
+- 默认引擎为 `get_validation_engine("custom")`。`nautilus` 仅支持 `ma_cross`、最多 10 标的、日线 SIM 简化撮合；未安装、无 Catalog 或不支持策略时必须失败，不得回退 custom。
 
 ---
 
@@ -165,8 +175,12 @@ python -m qmt_quant.cli serve api
 ```bash
 pip install -e ".[quant,web,dev]"
 pytest
+# 显式运行代表性大数据性能基线（默认 pytest 会排除）
+pytest -m performance
 ```
 
+- **危险：测试 fixture 会清库。** `tests/conftest.py` 的 `db` fixture 会对 `DATABASE_URL` 指向的库执行迁移并 `TRUNCATE ... CASCADE`。禁止把开发/生产库交给 pytest；推荐先创建并显式使用 `qmt_quant_test`，例如 `$env:DATABASE_URL="postgresql://qmt:qmt@localhost:5432/qmt_quant_test"`。
+- `pyproject.toml` 默认 `addopts = "-m 'not performance'"`；性能测试只在显式 `pytest -m performance` 时运行。
 - **Linux CI**（`.github/workflows/test.yml`）无 xtquant；勿让默认测试依赖 QMT 在线。
 - 改 `validation/`、`screener/`、`storage/`、`web/app.py` 后应跑相关测试或全量 `pytest`。
 - 声称修复完成前须有命令输出依据（见 user rule：evidence before assertions）。
@@ -202,6 +216,9 @@ pytest
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-18 | 统一策略插件与 A 股内核、实验产物/比较 API、rolling 选股快照与性能基线；Nautilus 明确为无 fallback 的实验引擎 |
+| 2026-08-17 | 原生周线：日线按实际交易周聚合，周末收盘确认并在下一交易日开盘执行，研究/验证/Walk-Forward/Web 全链路支持 |
+| 2026-08-17 | 可信基线与偏差修复：真实策略净值、点时股票池、禁止静态历史选股、停牌禁成交 |
 | 2026-07-31 | **PostgreSQL 迁移（Breaking）**：移除 SQLite；`docker compose` + `DATABASE_URL`；API Token / CORS / Pipeline subprocess P0 |
 | 2026-07-31 | 完善计划落地：数据质量、pe_momentum、ValidationEngine、选股 DSL/IC/bridge、xttrader 骨架、跨环境 job、Web 设置/任务页、CI |
 | 2026-07-31 | 新增 `AGENTS.md`：规定每次改动须同步 CHANGELOG + progress |
@@ -217,6 +234,7 @@ pytest
 | 变更记录 | [docs/CHANGELOG.md](./docs/CHANGELOG.md) |
 | Windows E2E | [docs/windows-e2e.md](./docs/windows-e2e.md) |
 | PostgreSQL 本地部署 | [docs/postgres-setup.md](./docs/postgres-setup.md) |
+| Nautilus 实验边界 | [docs/phase7-nautilus.md](./docs/phase7-nautilus.md) |
 | Canvas 原型 | [canvases/qmt-quant-ui-mockup.canvas.tsx](./canvases/qmt-quant-ui-mockup.canvas.tsx) |
 
 ---
@@ -227,9 +245,11 @@ pytest
 |--------|------|
 | QMT 拉数 | `adapters/qmt/client.py`、`core/sync/bars.py` |
 | 数据质量 | `adapters/qmt/transform.py`、`core/sync/check.py` |
-| VectorBT 研究 | `core/research/runner.py` |
+| 策略注册 / 一键回测 / 实验产物 | `core/backtest/strategy.py`、`runner.py`、`experiments.py` |
+| 日/周线 | `core/data/frequency.py` |
+| 快速研究 | `core/research/runner.py`、`walk_forward.py` |
 | 验证回测 | `core/validation/backtester.py`、`engine.py`、`runner.py` |
-| 选股 | `core/screener/runner.py`、`dsl.py`、`bridge.py` |
+| 选股 | `core/screener/runner.py`、`dsl.py`、`snapshots.py`、`bridge.py`、`ic.py` |
 | 实盘 | `adapters/qmt/trader.py`、`core/trade/dry_run.py` |
 | 后台任务 | `core/jobs/runner.py`、`cli/_job_worker.py` |
 | Web API | `web/app.py` |
@@ -238,4 +258,4 @@ pytest
 
 ---
 
-*最后更新：2026-08-12*
+*最后更新：2026-08-18*

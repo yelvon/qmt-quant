@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Dict, Optional, Sequence
 
 import pandas as pd
 
 from qmt_quant.config import get_settings
+from qmt_quant.core.data.frequency import BarFrequency, bars_to_price_matrix, load_bars
 from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.storage.bars import list_bar_codes, load_bars_df
 from qmt_quant.storage.database import db_session, run_migrations
+
+_PRICE_CACHE_TTL_SECONDS = 30.0
+_PRICE_CACHE_MAX_ENTRIES = 16
+_price_cache: dict[tuple[object, ...], tuple[float, pd.DataFrame]] = {}
+_price_cache_lock = threading.Lock()
 
 
 def _write_code_frame(frame: pd.DataFrame, path_base, adjust_type: str) -> str:
@@ -88,20 +96,42 @@ def load_price_matrix(
     start_date: str | None = None,
     end_date: str | None = None,
     codes: list[str] | None = None,
+    bar_frequency: BarFrequency | str = BarFrequency.DAILY,
 ) -> pd.DataFrame:
-    with db_session() as conn:
-        df = load_bars_df(
-            conn,
-            codes=codes,
+    frequency = BarFrequency.parse(bar_frequency)
+    key = (
+        adjust_type,
+        start_date,
+        end_date,
+        tuple(codes) if codes is not None else None,
+        frequency.value,
+    )
+    now = time.monotonic()
+    with _price_cache_lock:
+        cached = _price_cache.get(key)
+        if cached is not None and now - cached[0] <= _PRICE_CACHE_TTL_SECONDS:
+            return cached[1].copy()
+    matrix = bars_to_price_matrix(
+        load_bars(
+            adjust_type=adjust_type,
             start_date=start_date,
             end_date=end_date,
-            adjust_type=adjust_type,
+            codes=codes,
+            bar_frequency=frequency,
         )
-    if df.empty:
-        return pd.DataFrame()
-    pivot = df.pivot(index="date", columns="code", values="close")
-    pivot.index = pd.to_datetime(pivot.index)
-    return pivot.sort_index()
+    )
+    with _price_cache_lock:
+        if len(_price_cache) >= _PRICE_CACHE_MAX_ENTRIES:
+            oldest = min(_price_cache, key=lambda item: _price_cache[item][0])
+            _price_cache.pop(oldest, None)
+        _price_cache[key] = (now, matrix.copy())
+    return matrix
+
+
+def clear_price_matrix_cache() -> None:
+    """Invalidate process-local matrix cache after bar mutations or in tests."""
+    with _price_cache_lock:
+        _price_cache.clear()
 
 
 def load_ohlcv_df(
@@ -110,15 +140,12 @@ def load_ohlcv_df(
     start_date: str | None = None,
     end_date: str | None = None,
     codes: list[str] | None = None,
+    bar_frequency: BarFrequency | str = BarFrequency.DAILY,
 ) -> pd.DataFrame:
-    with db_session() as conn:
-        df = load_bars_df(
-            conn,
-            codes=codes,
-            start_date=start_date,
-            end_date=end_date,
-            adjust_type=adjust_type,
-        )
-    if df.empty:
-        return pd.DataFrame()
-    return df.sort_values(["date", "code"])
+    return load_bars(
+        adjust_type=adjust_type,
+        start_date=start_date,
+        end_date=end_date,
+        codes=codes,
+        bar_frequency=bar_frequency,
+    )

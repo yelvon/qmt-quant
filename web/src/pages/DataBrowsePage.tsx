@@ -271,7 +271,7 @@ export default function DataBrowsePage() {
         <Link to="/data" className="text-emerald-400 hover:underline">
           ② 准备数据
         </Link>{" "}
-        同步日线，并在「其他操作」中点「补全股票名称」。增量/全量同步完成后也会自动补全本次股票池的名称。
+        同步日线，并在「其他操作」中点「补全股票名称」。全量同步会自动补全名称；增量同步默认跳过（避免 5000+ 逐只调 QMT 拖慢更新）。
       </PageCallout>
 
       <div className="mb-4 flex flex-wrap gap-2">

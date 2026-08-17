@@ -20,10 +20,7 @@ def run_nautilus_validation(
     codes: Sequence[str] | None = None,
 ) -> ValidationResult:
     if strategy_id != "ma_cross":
-        from qmt_quant.core.validation.engine import CustomValidationEngine
-
-        engine = CustomValidationEngine()
-        return engine.run(strategy_id, prices, short_window=short_window, long_window=long_window)
+        raise ValueError(f"Nautilus 实验引擎暂不支持策略: {strategy_id}")
 
     try:
         from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
@@ -35,7 +32,7 @@ def run_nautilus_validation(
         from nautilus_trader.model.objects import Money
         from nautilus_trader.persistence.catalog import ParquetDataCatalog
     except ImportError:
-        return _fallback_custom(prices, short_window, long_window)
+        raise RuntimeError("Nautilus 实验引擎不可用：未安装 nautilus_trader")
 
     settings = get_settings()
     use_codes = list(codes or prices.columns)[:10]
@@ -57,7 +54,7 @@ def run_nautilus_validation(
 
     instruments = catalog.instruments()
     if not instruments:
-        return _fallback_custom(prices, short_window, long_window)
+        raise RuntimeError("Nautilus 实验引擎不可用：catalog 中没有可回测标的")
 
     for inst in instruments[:10]:
         engine.add_instrument(inst)
@@ -93,9 +90,3 @@ def run_nautilus_validation(
         trade_count=0,
         equity_curve=[{"date": "end", "equity": round(total / settings.initial_cash * 100, 2)}],
     )
-
-
-def _fallback_custom(prices: pd.DataFrame, short: int, long: int) -> ValidationResult:
-    from qmt_quant.core.validation.backtester import AShareDailyBacktester
-
-    return AShareDailyBacktester(prices).run_ma_cross(short, long)

@@ -4,11 +4,11 @@ import PageCallout from "../components/PageCallout";
 const sections = [
   {
     title: "数据浏览（② 同步后）",
-    body: "在「数据浏览」页可按交易日查看横截面、按代码查看时间序列，并绘制日 K 线。若无数据请先在 ② 准备数据 同步日线。",
+    body: "在「数据浏览」页可按交易日查看横截面、按代码查看时间序列并绘制日 K 线。策略回测支持把本地日线按实际交易周聚合为周线；周末最后交易日确认信号，下一实际交易日成交。",
   },
   {
-    title: "VectorBT 快速试策略（③）",
-    body: "用 VectorBT 在日线数据上做参数扫描和热力图，快速找到较优的均线组合。结果仅供参考，不能代替真实成交规则验证。",
+    title: "策略回测（③）",
+    body: "简单模式一次完成参数扫描与 A 股规则验证并展示净值；研究模式先扫描候选参数，再送到 ④ 做规则验证。日线与周线周期会随研究记录传递。",
   },
   {
     title: "自研验证器 / Nautilus（④）",
@@ -20,7 +20,11 @@ const sections = [
   },
   {
     title: "Walk-Forward 稳健性",
-    body: "将历史切成多段 train/test：在 train 段选最优参数，在 test 段看样本外收益。stability_score 表示 OOS 正收益段占比，越高越稳健。",
+    body: "将历史切成多段 train/test：在 train 段选最优参数，在 test 段看样本外收益。可用日线/周线预设，并配置 Purge 与 Embargo 隔离样本，降低信息泄漏。",
+  },
+  {
+    title: "实验中心与因子 IC",
+    body: "实验中心统一查看候选扫描、规则验证与 Walk-Forward 记录，可筛选、对比指标变化并继续研究。因子 IC 支持日线/周线和多个未来收益周期；同一因子会按 horizon 分行展示。",
   },
 ];
 

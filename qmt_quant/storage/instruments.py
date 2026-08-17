@@ -164,17 +164,34 @@ def fetch_and_store_names(
     if client is None:
         client = XtDataClient()
 
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from qmt_quant.config import get_settings
+    from qmt_quant.core.jobs.context import is_job_cancelled, report_job_progress
     from qmt_quant.core.sync.parallel import qmt_semaphore
 
+    settings = get_settings()
+    workers = max(1, min(int(settings.sync_concurrency), 4))
     updated = 0
     total = len(missing)
     size = max(1, batch_size)
 
+    def _fetch_one(code: str) -> Optional[Tuple[str, str, Optional[str], Optional[str], bool]]:
+        try:
+            with qmt_semaphore():
+                detail = client.get_instrument_detail(code)
+        except Exception:
+            return None
+        name, list_date, delist_date, is_st = _profile_from_detail(code, detail or {})
+        if not name:
+            return None
+        return code, name, list_date, delist_date, is_st
+
     for offset in range(0, total, size):
+        if job_id and is_job_cancelled(job_id):
+            break
         batch = missing[offset : offset + size]
         if job_id:
-            from qmt_quant.core.jobs.context import report_job_progress
-
             done = min(offset + len(batch), total)
             report_job_progress(
                 job_id,
@@ -184,15 +201,23 @@ def fetch_and_store_names(
                 detail=f"本批 {len(batch)} 只",
             )
 
-        for code in batch:
-            try:
-                with qmt_semaphore():
-                    detail = client.get_instrument_detail(code)
-            except Exception:
+        if workers == 1:
+            profiles = [_fetch_one(code) for code in batch]
+        else:
+            profiles = []
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(_fetch_one, code): code for code in batch}
+                for future in as_completed(futures):
+                    if job_id and is_job_cancelled(job_id):
+                        break
+                    row = future.result()
+                    if row:
+                        profiles.append(row)
+
+        for row in profiles:
+            if not row:
                 continue
-            name, list_date, delist_date, is_st = _profile_from_detail(code, detail or {})
-            if not name:
-                continue
+            code, name, list_date, delist_date, is_st = row
             upsert_profile(
                 conn,
                 code,
@@ -202,6 +227,9 @@ def fetch_and_store_names(
                 is_st=is_st,
             )
             updated += 1
+
+        if job_id and is_job_cancelled(job_id):
+            break
 
     return updated
 

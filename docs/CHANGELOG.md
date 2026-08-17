@@ -8,11 +8,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- 统一 `core/backtest` 基础层：共享 `StrategyRegistry` / `StrategyPlugin`、成本与组合配置、确定性计算 kernel；research、Walk-Forward 与 custom validation 按同一策略 ID 解析
+- 实验中心：每次研究/验证保存 strategy identity、数据指纹、manifest、完整指标/诊断及隔离的 `reports/<run_id>/` 产物；新增实验列表、详情、双 run 比较 API 与 Web 页面
+- 选股 rolling 点时快照与审计：`SelectionSnapshotProvider` 在每个调仓日仅使用当时可见数据；rolling IC 支持多窗口/多 horizon
+- 代表性性能基线（300 标的、10 年、参数网格、周线、rolling IC），以 `performance` marker 显式运行
+- 原生周线研究与验证：`BarFrequency(daily/weekly)` 统一加载入口从本地日线按实际交易日期聚合 OHLCV/amount/pre_close，API/job/策略参数及 Web 支持周期选择，Walk-Forward 窗口按所选 K 线根数计量
+- 周线采用日频执行上下文：每周实际最后交易日收盘确认信号，下一实际交易日开盘成交；新增节假日短周聚合与无未来函数测试
+- 点时 `PointInTimeUniverse` 服务，按上市/退市日期过滤，可供研究、验证和选股复用；新增可信基线黄金测试
+- `SelectionSnapshotProvider.codes_as_of(date)` 历史选股快照扩展接口
 - 单股验证写入全部成交并在日 K 标注 B/S；多标的成交列表截断并带 `trades_truncated`
-- 研究股票池可选 `sample=head|turnover` 与 `universe_n`（默认仍代码序前 50）
+- 研究股票池支持 `sample=all|turnover` 与可选 `universe_n`
 - 单股策略 `signal_replay`：信号表走 A 股规则引擎；无 K 线日期写入 `skipped_signals`
 - `/api/status.has_strategy_run`：引导第三步「试策略」按是否已有回测/验证记录勾选
-- `GET /api/options/research-universe`：提交前展示股票池规模 vs 实际回测只数；支持 `sample` / `universe_n`（默认仍代码序 50）
+- `GET /api/options/research-universe`：提交前展示股票池规模 vs 实际回测只数；支持 `sample` / `universe_n`
 - `GET /api/options/validation-engines`；验证页可选引擎；设置页可保存 `validation_engine`（默认仍 custom）
 - 选股表单透传均线窗口 / 上市天数；YAML 可编辑；`rule_yaml` 非法返回 400
 - 实盘预览走风控；`TradeBody.orders[]`；页面展示持仓/资金，支持买卖与手数
@@ -50,6 +58,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Nautilus 明确降级为显式实验引擎：仅 `ma_cross`、日线、最多导入 10 标的且当前只运行首标的 SIM 策略；依赖/Catalog/能力失败直接报错，绝不 fallback custom
+- 默认 `pytest` 排除 `performance` marker；本地数据库 fixture 会清空目标库，文档统一要求使用独立 `qmt_quant_test`
+- Web 主导航调整为 ⑤实验中心、⑥选股/实盘高级
+- 研究股票池默认使用确定性完整代码集，不再隐式截断前 50；显式流动性抽样改用回测期初数据
 - 顶栏 ①–⑥ 编号固定，不再随回测模式改序号或隐藏 ④
 - 总览一键跑通步骤跟随 `job.step`；简单模式完成 CTA 去 ③
 - 简单/单股模式打开 ④ 仍可看历史验证，不再整页拦截
@@ -67,6 +79,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- 研究报告净值严格来自策略收益，不再缺失时回退为全股票等权净值
+- 禁止单次 `screening_rebalance` 选股结果静态贯穿历史；停牌（`volume=0`）信号禁止成交并记录原因
 - 选股结果代码可跳转 K 线；数据浏览支持 `?tab=&code=`
 - Walk-Forward 非双均线时按钮禁用并说明原因
 - Validation 落库 engine 误标 `nautilus` → 按实际引擎 `custom_validator` / `nautilus`

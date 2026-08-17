@@ -27,6 +27,8 @@ data:
     completeness_threshold: 0.85
     auto_repair: false
     auto_repair_max_codes: 200
+    # 增量同步默认跳过名称补全（5000+ 逐只调 QMT 极慢）；全量同步仍会补全
+    name_backfill_on_incremental: false
     # 同步并发：1=安全默认（MiniQMT 单连接）；2~4 可加速全量但可能不稳定
     concurrency: 1
 

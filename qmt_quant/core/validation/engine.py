@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 import pandas as pd
 
 from qmt_quant.config import get_settings
+from qmt_quant.core.backtest.strategy import STRATEGIES
 from qmt_quant.core.validation.backtester import AShareDailyBacktester, ValidationResult
 
 
@@ -36,30 +37,23 @@ class CustomValidationEngine:
         ohlcv: pd.DataFrame | None = None,
         **params,
     ) -> ValidationResult:
-        engine = AShareDailyBacktester(prices, ohlcv=ohlcv, **self._kwargs)
-        if strategy_id == "ma_cross":
-            return engine.run_ma_cross(
-                int(params.get("short_window", 20)),
-                int(params.get("long_window", 120)),
-            )
-        if strategy_id == "buy_hold":
-            return engine.run_buy_hold()
-        if strategy_id == "pe_momentum":
-            return engine.run_pe_momentum(
-                pe_threshold=float(params.get("pe_threshold", 30)),
-                momentum_window=int(params.get("momentum_window", 20)),
-            )
-        if strategy_id == "screening_rebalance":
-            return engine.run_screening_rebalance(
-                params.get("screen_run_id"),
-                rebalance_days=int(params.get("rebalance_days", 20)),
-            )
+        cost_model = params.pop("cost_model", None)
+        portfolio = params.pop("portfolio", None)
+        signal_prices = params.pop("signal_prices", None)
+        signal_ohlcv = params.pop("signal_ohlcv", None)
+        engine = AShareDailyBacktester(
+            prices,
+            ohlcv=ohlcv,
+            signal_prices=signal_prices,
+            signal_ohlcv=signal_ohlcv,
+            cost_model=cost_model,
+            portfolio=portfolio,
+            **self._kwargs,
+        )
         if strategy_id == "signal_replay":
             return engine.run_signals(params.get("signals") or [])
-        return engine.run_ma_cross(
-            int(params.get("short_window", 20)),
-            int(params.get("long_window", 120)),
-        )
+        STRATEGIES.get(strategy_id)
+        return engine.run_strategy(strategy_id, params, metadata=params.get("metadata"))
 
 
 class NautilusValidationEngine:
@@ -104,5 +98,5 @@ def validation_engine_display_name(name: str | None = None) -> str:
     """User-facing engine name (never show raw ids in UI copy)."""
     engine_name = name or get_settings().validation_engine
     if engine_name == "nautilus":
-        return "高保真引擎"
+        return "Nautilus 实验引擎"
     return "A 股规则引擎"

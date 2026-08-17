@@ -42,6 +42,7 @@ class Settings:
     sync_completeness_threshold: float = 0.85
     sync_auto_repair: bool = False
     sync_auto_repair_max_codes: int = 200
+    sync_name_backfill_on_incremental: bool = False
     auto_export_catalog: bool = False
     initial_cash: float = 1_000_000.0
     commission_rate: float = 0.0003
@@ -102,6 +103,9 @@ class Settings:
             sync_auto_repair=bool(sync.get("auto_repair", cls.sync_auto_repair)),
             sync_auto_repair_max_codes=int(
                 sync.get("auto_repair_max_codes", cls.sync_auto_repair_max_codes)
+            ),
+            sync_name_backfill_on_incremental=bool(
+                sync.get("name_backfill_on_incremental", cls.sync_name_backfill_on_incremental)
             ),
             auto_export_catalog=bool(data.get("auto_export_catalog", cls.auto_export_catalog)),
             initial_cash=float(bt.get("initial_cash", cls.initial_cash)),
@@ -171,6 +175,7 @@ class Settings:
                     "completeness_threshold": self.sync_completeness_threshold,
                     "auto_repair": self.sync_auto_repair,
                     "auto_repair_max_codes": self.sync_auto_repair_max_codes,
+                    "name_backfill_on_incremental": self.sync_name_backfill_on_incremental,
                     "concurrency": self.sync_concurrency,
                 },
             },

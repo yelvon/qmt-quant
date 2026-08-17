@@ -97,12 +97,25 @@ def save_backtest_run(
     params: Dict[str, Any],
     metrics: Dict[str, Any],
     result_path: Optional[str] = None,
+    run_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    run_kind: str = "validation",
+    strategy_version: Optional[str] = None,
+    strategy_code_hash: Optional[str] = None,
+    settings_snapshot: Optional[Dict[str, Any]] = None,
+    data_fingerprint: Optional[Dict[str, Any]] = None,
+    universe: Optional[List[str]] = None,
+    artifact_dir: Optional[str] = None,
 ) -> str:
-    run_id = new_id()
+    run_id = run_id or new_id()
     conn.execute(
         """
-        INSERT INTO backtest_run(id, engine, strategy_id, title, params_json, metrics_json, result_path, status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, 'completed')
+        INSERT INTO backtest_run(
+            id, engine, strategy_id, title, params_json, metrics_json, result_path,
+            status, job_id, run_kind, strategy_version, strategy_code_hash,
+            settings_json, data_fingerprint_json, universe_json, artifact_dir
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'completed', %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             run_id,
@@ -112,6 +125,14 @@ def save_backtest_run(
             json.dumps(params, ensure_ascii=False),
             json.dumps(metrics, ensure_ascii=False),
             result_path,
+            job_id,
+            run_kind,
+            strategy_version,
+            strategy_code_hash,
+            json.dumps(settings_snapshot or {}, ensure_ascii=False),
+            json.dumps(data_fingerprint or {}, ensure_ascii=False),
+            json.dumps(universe or [], ensure_ascii=False),
+            artifact_dir,
         ),
     )
     return run_id
@@ -121,7 +142,28 @@ def get_backtest_run(conn: DbConnection, run_id: str) -> Optional[Dict[str, Any]
     d = row_to_dict(conn, "SELECT * FROM backtest_run WHERE id = %s", (run_id,))
     if not d:
         return None
-    for key in ("params_json", "metrics_json"):
+    for key in ("params_json", "metrics_json", "settings_json", "data_fingerprint_json", "universe_json"):
         if d.get(key):
             d[key] = json.loads(d[key])
+    d["params"] = d.get("params_json") or {}
+    d["metrics"] = d.get("metrics_json") or {}
     return d
+
+
+def list_backtest_runs(
+    conn: DbConnection, *, limit: int = 50, run_kind: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    where, params = "", []
+    if run_kind:
+        where, params = "WHERE run_kind = %s", [run_kind]
+    params.append(max(1, min(int(limit), 500)))
+    rows = rows_to_dicts(
+        conn, f"SELECT * FROM backtest_run {where} ORDER BY created_at DESC LIMIT %s", params
+    )
+    for row in rows:
+        for key in ("params_json", "metrics_json", "settings_json", "data_fingerprint_json", "universe_json"):
+            if row.get(key):
+                row[key] = json.loads(row[key])
+        row["params"] = row.get("params_json") or {}
+        row["metrics"] = row.get("metrics_json") or {}
+    return rows

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from qmt_quant.core.jobs.context import report_job_progress
+from qmt_quant.core.data.frequency import BarFrequency
 from qmt_quant.core.research.runner import run_research
 from qmt_quant.core.validation.runner import run_validation
 
@@ -23,9 +24,10 @@ def run_backtest(
     benchmark: str = "hs300",
     screen_run_id: Optional[str] = None,
     codes: Optional[list[str]] = None,
-    sample: str = "head",
+    sample: str = "all",
     universe_n: Optional[int] = None,
     signals: Optional[list] = None,
+    bar_frequency: BarFrequency | str = BarFrequency.DAILY,
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run parameter scan (research) then high-fidelity validation in one job."""
@@ -39,6 +41,7 @@ def run_backtest(
             benchmark=benchmark,
             codes=codes,
             signals=signals or [],
+            bar_frequency=bar_frequency,
             job_id=job_id,
         )
 
@@ -62,6 +65,7 @@ def run_backtest(
         codes=codes,
         sample=sample,
         universe_n=universe_n,
+        bar_frequency=bar_frequency,
         job_id=None,
     )
     if research.get("error"):
@@ -85,6 +89,7 @@ def run_backtest(
         match_price=match_price,
         benchmark=benchmark,
         codes=codes,
+        bar_frequency=bar_frequency,
         job_id=job_id,
     )
     if validate.get("error"):

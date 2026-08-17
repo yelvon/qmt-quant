@@ -46,3 +46,8 @@ include = ["qmt_quant*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m 'not performance'"
+markers = [
+    "performance: opt-in large-universe performance baselines",
+    "postgres: requires a configured PostgreSQL test database",
+]

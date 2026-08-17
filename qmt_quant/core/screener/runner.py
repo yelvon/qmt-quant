@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from qmt_quant.core.catalog.export import load_price_matrix
@@ -13,7 +13,7 @@ from qmt_quant.core.screener.rules import apply_rules
 from qmt_quant.core.screener.templates import TEMPLATES
 from qmt_quant.core.sync.universe import list_days_since, resolve_universe
 from qmt_quant.storage.database import db_session, run_migrations
-from qmt_quant.storage.financial import load_financial_asof
+from qmt_quant.storage.financial import load_financial_batch_asof
 
 
 def run_screening(
@@ -27,6 +27,8 @@ def run_screening(
     ma_window: Optional[int] = None,
     list_days_lt: Optional[int] = 120,
     rule: Optional[ScreeningRule] = None,
+    as_of_date: Optional[str] = None,
+    persist: bool = True,
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
@@ -39,7 +41,7 @@ def run_screening(
     list_min_days = list_days_lt if list_days_lt is not None else rule.list_days_lt
     exclude_st = rule.exclude_st if rule.exclude_st is not None else exclude_st
     top_n = rule.top_n or top_n
-    as_of = rule.as_of or date.today().isoformat()
+    as_of = as_of_date or rule.as_of or date.today().isoformat()
 
     if job_id:
         report_job_progress(
@@ -50,7 +52,12 @@ def run_screening(
             detail=f"模板 {template_id} · {sector}",
         )
     codes = resolve_universe(sector)
-    prices = load_price_matrix(codes=codes[:800] if codes else None)
+    history_start = (date.fromisoformat(as_of) - timedelta(days=500)).isoformat()
+    prices = load_price_matrix(
+        codes=codes[:800] if codes else None,
+        start_date=history_start,
+        end_date=as_of,
+    )
     if prices.empty:
         return {"error": "no_price_data", "results": []}
 
@@ -60,6 +67,15 @@ def run_screening(
     columns = list(prices.columns)
     total = len(columns)
     with db_session() as conn:
+        instrument_rows = conn.execute(
+            "SELECT code, name, is_st, list_date FROM instrument WHERE code = ANY(%s)",
+            (columns,),
+        ).fetchall()
+        instruments = {
+            str(code): (name, is_st, list_date)
+            for code, name, is_st, list_date in instrument_rows
+        }
+        financials = load_financial_batch_asof(conn, "Pershareindex", columns, as_of)
         for i, code in enumerate(columns):
             if job_id and (i == 0 or i % 50 == 0 or i == total - 1):
                 report_job_progress(
@@ -69,9 +85,7 @@ def run_screening(
                     step="scan",
                     detail=f"PE≤{pe_limit} · ROE≥{roe_limit}",
                 )
-            name_row = conn.execute(
-                "SELECT name, is_st, list_date FROM instrument WHERE code=%s", (code,)
-            ).fetchone()
+            name_row = instruments.get(code)
             name = name_row[0] if name_row else code.split(".")[0]
             is_st = bool(name_row[1]) if name_row else ("ST" in name.upper())
             list_date = name_row[2] if name_row else None
@@ -82,7 +96,7 @@ def run_screening(
                 if days is not None and days < list_min_days:
                     skipped_list_days += 1
                     continue
-            fin = load_financial_asof(conn, "Pershareindex", code, as_of) or {}
+            fin = financials.get(code, {})
             pe = _num(fin.get("pe") or fin.get("s_fa_pe") or fin.get("pe_ttm"))
             roe = _num(fin.get("roe") or fin.get("s_fa_roe"))
             if pe is None or roe is None:
@@ -138,15 +152,16 @@ def run_screening(
     reason = rule.name or template.name
     if job_id:
         report_job_progress(job_id, 0.92, "写入选股结果…", step="rank", detail=f"入选 {len(selected)} 只")
-    with db_session() as conn:
-        for i, row in enumerate(selected, start=1):
-            conn.execute(
+    if persist:
+        with db_session() as conn:
+            for i, row in enumerate(selected, start=1):
+                conn.execute(
                 """
                 INSERT INTO screening_result(run_id, as_of_date, code, score, reason, rank_no)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (run_id, as_of, row["code"], row["score"], reason, i),
-            )
+                    (run_id, as_of, row["code"], row["score"], reason, i),
+                )
 
     return {
         "run_id": run_id,

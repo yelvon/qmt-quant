@@ -8,22 +8,21 @@ from qmt_quant.config import get_settings
 from qmt_quant.core.screener.bridge import load_codes_by_run_id
 from qmt_quant.core.sync.universe import resolve_universe
 
-RESEARCH_UNIVERSE_CAP = 50
 TURNOVER_LOOKBACK_BARS = 20
 WATCHLIST_SECTORS = ("watchlist", "我的自选池")
 
 
 def _normalize_sample(sample: Optional[str]) -> str:
-    value = str(sample or "head").strip().lower()
-    return "turnover" if value == "turnover" else "head"
+    value = str(sample or "all").strip().lower()
+    return value if value in {"all", "turnover"} else "all"
 
 
-def _cap_n(universe_n: Optional[int]) -> int:
+def _cap_n(universe_n: Optional[int]) -> Optional[int]:
     try:
-        n = int(universe_n) if universe_n is not None else RESEARCH_UNIVERSE_CAP
+        n = int(universe_n) if universe_n is not None else None
     except (TypeError, ValueError):
-        n = RESEARCH_UNIVERSE_CAP
-    return n if n > 0 else RESEARCH_UNIVERSE_CAP
+        n = None
+    return n if n is not None and n > 0 else None
 
 
 def _explicit_pool(
@@ -110,8 +109,9 @@ def resolve_research_universe_meta(
     strategy_id: str = "ma_cross",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
-    sample: str = "head",
+    sample: str = "all",
     universe_n: Optional[int] = None,
+    range_start: Optional[str] = None,
     range_end: Optional[str] = None,
     adjust_type: Optional[str] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
@@ -132,7 +132,10 @@ def resolve_research_universe_meta(
         universe = resolve_universe(sector)
         if sector in WATCHLIST_SECTORS:
             universe = resolve_universe("watchlist")
-    universe = list(universe or [])
+    universe = sorted(dict.fromkeys(universe or []))
+    from qmt_quant.core.universe import filter_universe_as_of
+
+    universe = filter_universe_as_of(universe, range_start)
 
     if _explicit_pool(
         strategy_id=strategy_id,
@@ -140,22 +143,27 @@ def resolve_research_universe_meta(
         screen_run_id=screen_run_id,
         sector=sector,
     ):
-        meta["universe_n"] = len(universe) if universe else cap_n
-        meta["sample"] = "head"
+        meta["universe_n"] = len(universe)
+        meta["sample"] = "all"
         return universe, meta
 
     if not universe:
         return [], meta
 
-    meta["sampled"] = True
+    if cap_n is None:
+        meta["universe_n"] = len(universe)
+        return universe, meta
+
+    meta["sampled"] = len(universe) > cap_n
     if sample_mode == "turnover":
-        amounts = load_turnover_sums(universe, range_end=range_end, adjust_type=adjust_type)
+        # Rank only with information available at the backtest start. Ranking at
+        # range_end is a liquidity look-ahead.
+        amounts = load_turnover_sums(universe, range_end=range_start, adjust_type=adjust_type)
         ranked = rank_codes_by_turnover(universe, amounts, cap_n)
         if ranked:
             return ranked, meta
-        meta["sample_fallback"] = "head"
-        meta["sample"] = "head"
-        return list(universe[:cap_n]), meta
+        meta["sample_fallback"] = "code_order"
+        meta["sample"] = "all"
     return list(universe[:cap_n]), meta
 
 
@@ -165,8 +173,9 @@ def resolve_research_universe(
     strategy_id: str = "ma_cross",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
-    sample: str = "head",
+    sample: str = "all",
     universe_n: Optional[int] = None,
+    range_start: Optional[str] = None,
     range_end: Optional[str] = None,
     adjust_type: Optional[str] = None,
 ) -> List[str]:
@@ -178,6 +187,7 @@ def resolve_research_universe(
         screen_run_id=screen_run_id,
         sample=sample,
         universe_n=universe_n,
+        range_start=range_start,
         range_end=range_end,
         adjust_type=adjust_type,
     )
@@ -190,8 +200,9 @@ def describe_research_universe(
     strategy_id: str = "ma_cross",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
-    sample: str = "head",
+    sample: str = "all",
     universe_n: Optional[int] = None,
+    range_start: Optional[str] = None,
     range_end: Optional[str] = None,
 ) -> dict:
     """Pool size vs actual research/backtest size."""
@@ -211,16 +222,17 @@ def describe_research_universe(
         screen_run_id=screen_run_id,
         sample=sample,
         universe_n=universe_n,
+        range_start=range_start,
         range_end=range_end,
     )
     used_n = len(used)
     sampled = bool(meta.get("sampled"))
     fallback = meta.get("sample_fallback")
-    sample_mode = meta.get("sample") or "head"
+    sample_mode = meta.get("sample") or "all"
     if sampled and sample_mode == "turnover" and not fallback:
         sample_label = f"近{TURNOVER_LOOKBACK_BARS}日成交额前 {used_n}"
     elif sampled:
-        sample_label = f"代码序前 {used_n}"
+        sample_label = f"确定性代码序前 {used_n}"
     else:
         sample_label = "全部标的"
     cap = None if not sampled else meta.get("universe_n")
@@ -247,12 +259,15 @@ def universe_from_research_run(research: dict) -> Optional[List[str]]:
     if preset:
         from qmt_quant.core.presets import resolve_range_preset
 
-        _start, range_end = resolve_range_preset(str(preset))
+        range_start, range_end = resolve_range_preset(str(preset))
+    else:
+        range_start = None
     return resolve_research_universe(
         sector=str(params.get("sector") or "沪深A股"),
         strategy_id=str(research.get("strategy_id") or "ma_cross"),
         screen_run_id=params.get("screen_run_id"),
-        sample=str(params.get("sample") or "head"),
+        sample=str(params.get("sample") or "all"),
         universe_n=params.get("universe_n"),
+        range_start=range_start,
         range_end=range_end,
     )

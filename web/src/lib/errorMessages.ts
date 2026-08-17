@@ -5,6 +5,7 @@ export type HumanError = {
 };
 
 const RULES: { match: RegExp; message: string; route?: string; routeLabel?: string }[] = [
+  { match: /409|conflict|already running|任务.*运行|并发/i, message: "已有同类任务正在运行，请先查看当前进度或到任务记录等待完成", route: "/jobs", routeLabel: "查看任务记录" },
   { match: /no_price_data/i, message: "请先同步日线数据", route: "/data", routeLabel: "去准备数据" },
   { match: /xtquant|qmt_python|qmt-env/i, message: "QMT 环境未就绪，请检查 Python 路径", route: "/settings", routeLabel: "去设置" },
   { match: /\[sync\]/i, message: "数据同步失败，请确认 QMT 已登录", route: "/data", routeLabel: "去准备数据" },

@@ -46,6 +46,7 @@ export default function ResearchPage() {
   const [shortP, setShortP] = useState("preset_std");
   const [longP, setLongP] = useState("preset_std");
   const [match, setMatch] = useState("next_open");
+  const [barFrequency, setBarFrequency] = useState("daily");
   const [strategies, setStrategies] = useState<{ id: string; label: string }[]>([]);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [ranges, setRanges] = useState<{ id: string; label: string }[]>([]);
@@ -64,8 +65,8 @@ export default function ResearchPage() {
     sample_label?: string;
     sample_fallback?: string | null;
   } | null>(null);
-  const [sampleMode, setSampleMode] = useState("head");
-  const [universeN, setUniverseN] = useState("50");
+  const [sampleMode, setSampleMode] = useState("all");
+  const [universeN, setUniverseN] = useState("");
   const [signalText, setSignalText] = useState("");
 
   const [result, setResult] = useState<any>(null);
@@ -78,8 +79,10 @@ export default function ResearchPage() {
 
   const [wfOpen, setWfOpen] = useState(false);
   const [wfResult, setWfResult] = useState<any>(null);
-  const [trainMonths, setTrainMonths] = useState(12);
-  const [testMonths, setTestMonths] = useState(3);
+  const [trainBars, setTrainBars] = useState(252);
+  const [testBars, setTestBars] = useState(63);
+  const [purgeBars, setPurgeBars] = useState(0);
+  const [embargoBars, setEmbargoBars] = useState(0);
 
   const isBacktestLike = isSimple || isSingle;
   const jobType = job.jobType || (isBacktestLike ? "backtest" : "research");
@@ -120,7 +123,10 @@ export default function ResearchPage() {
 
   function samplingFields() {
     if (!isPool || sector !== "沪深A股") return {};
-    return { sample: sampleMode, universe_n: Number(universeN) || 50 };
+    return {
+      sample: sampleMode,
+      ...(universeN ? { universe_n: Number(universeN) } : {}),
+    };
   }
 
   function parsedSignals() {
@@ -158,9 +164,9 @@ export default function ResearchPage() {
       sector,
       strategy,
       sample: sampleMode,
-      universe_n: universeN,
       range_preset: range,
     });
+    if (universeN) qs.set("universe_n", universeN);
     apiGet<{
       pool_size: number;
       used: number;
@@ -325,6 +331,7 @@ export default function ResearchPage() {
         long_preset: longP,
         match,
         benchmark: "hs300",
+        bar_frequency: barFrequency,
         ...jobCodeField(),
         ...samplingFields(),
         ...(strategy === "signal_replay" ? { signals: parsedSignals() } : {}),
@@ -348,6 +355,7 @@ export default function ResearchPage() {
         range_preset: range,
         short_preset: shortP,
         long_preset: longP,
+        bar_frequency: barFrequency,
         ...jobCodeField(),
         ...samplingFields(),
       },
@@ -363,10 +371,6 @@ export default function ResearchPage() {
 
   async function runWalkForward() {
     if (!requireStock()) return;
-    if (!usesMaPresets(strategy)) {
-      setPageError("Walk-Forward 目前仅支持「双均线」策略，请先切换策略。");
-      return;
-    }
     await startJob(
       "/api/jobs/research/walk-forward",
       {
@@ -375,8 +379,12 @@ export default function ResearchPage() {
         range_preset: range,
         short_preset: shortP,
         long_preset: longP,
-        train_months: trainMonths,
-        test_months: testMonths,
+        train_bars: trainBars,
+        test_bars: testBars,
+        bar_frequency: barFrequency,
+        window_type: "rolling",
+        purge_bars: purgeBars,
+        embargo_bars: embargoBars,
         ...jobCodeField(),
         ...samplingFields(),
       },
@@ -502,8 +510,8 @@ export default function ResearchPage() {
               label="抽样"
               value={sampleMode}
               options={[
-                { id: "head", label: "代码序" },
-                { id: "turnover", label: "近20日成交额" },
+                { id: "all", label: "全部（默认）" },
+                { id: "turnover", label: "期初近20日成交额" },
               ]}
               onChange={setSampleMode}
             />
@@ -511,6 +519,7 @@ export default function ResearchPage() {
               label="抽样只数"
               value={universeN}
               options={[
+                { id: "", label: "不限" },
                 { id: "50", label: "50" },
                 { id: "100", label: "100" },
                 { id: "300", label: "300" },
@@ -520,6 +529,15 @@ export default function ResearchPage() {
           </>
         )}
         <PresetSelect label="区间" value={range} options={ranges} onChange={setRange} />
+        <PresetSelect
+          label="K 线周期"
+          value={barFrequency}
+          options={[
+            { id: "daily", label: "日线" },
+            { id: "weekly", label: "周线" },
+          ]}
+          onChange={setBarFrequency}
+        />
         {isBacktestLike ? (
           <PresetSelect
             label="成交模式"
@@ -541,11 +559,16 @@ export default function ResearchPage() {
           </div>
         )}
       </div>
+      <p className="mt-2 text-xs text-slate-400">
+        {barFrequency === "weekly"
+          ? "周线由本地日线按实际交易日聚合；周末最后交易日收盘确认信号，下一实际交易日开盘成交。"
+          : "日线收盘确认信号，下一实际交易日开盘成交。"}
+      </p>
 
       {isPool && universeInfo?.capped && (
         <p className="mt-2 text-xs text-amber-300/90">
           股票池共 {universeInfo.pool_size} 只，本次按「{universeInfo.sample_label || `代码序前 ${universeInfo.used}`}」取样。
-          {universeInfo.sample_fallback === "head" ? " 成交额不足，已回退为代码序。" : ""}
+          {universeInfo.sample_fallback === "code_order" ? " 成交额不足，已回退为确定性代码序。" : ""}
           {sector === "watchlist" ? (
             <>
               <Link to="/data#watchlist" className="ml-1 underline hover:text-slate-200">
@@ -665,42 +688,72 @@ export default function ResearchPage() {
           <p className="mt-2 text-sm text-slate-400">
             在 train 段选最优参数，在 test 段看样本外收益。stability 越高说明越稳健。
           </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="btn-secondary" onClick={() => {
+              setTrainBars(barFrequency === "weekly" ? 52 : 252);
+              setTestBars(barFrequency === "weekly" ? 13 : 63);
+            }}>
+              {barFrequency === "weekly" ? "1 年训练 + 1 季测试" : "1 年训练 + 1 季测试"}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => {
+              setTrainBars(barFrequency === "weekly" ? 104 : 504);
+              setTestBars(barFrequency === "weekly" ? 26 : 126);
+            }}>
+              2 年训练 + 半年测试
+            </button>
+          </div>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
-              <label className="label">Train 月数</label>
+              <label className="label">Train K 线根数（{barFrequency === "weekly" ? "周" : "日"}）</label>
               <input
                 className="input w-full"
                 type="number"
-                min={3}
-                value={trainMonths}
-                onChange={(e) => setTrainMonths(Number(e.target.value))}
+                min={2}
+                value={trainBars}
+                onChange={(e) => setTrainBars(Number(e.target.value))}
               />
             </div>
             <div>
-              <label className="label">Test 月数</label>
+              <label className="label">Test K 线根数（{barFrequency === "weekly" ? "周" : "日"}）</label>
               <input
                 className="input w-full"
                 type="number"
                 min={1}
-                value={testMonths}
-                onChange={(e) => setTestMonths(Number(e.target.value))}
+                value={testBars}
+                onChange={(e) => setTestBars(Number(e.target.value))}
               />
             </div>
+            <div>
+              <label className="label">Purge 间隔（{barFrequency === "weekly" ? "周" : "交易日"}）</label>
+              <input className="input w-full" type="number" min={0} value={purgeBars} onChange={(e) => setPurgeBars(Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="label">Embargo 间隔（{barFrequency === "weekly" ? "周" : "交易日"}）</label>
+              <input className="input w-full" type="number" min={0} value={embargoBars} onChange={(e) => setEmbargoBars(Number(e.target.value))} />
+            </div>
           </div>
+          <p className="mt-2 text-xs text-slate-500">
+            当前窗口约为：训练 {barFrequency === "weekly" ? `${Math.round(trainBars / 52 * 10) / 10} 年` : `${Math.round(trainBars / 21)} 个月`}
+            {" · "}测试 {barFrequency === "weekly" ? `${Math.round(testBars / 4.33)} 个月` : `${Math.round(testBars / 21)} 个月`}。
+            Purge/Embargo 用于隔离训练与测试样本，降低信息泄漏。
+          </p>
           <button
             className="btn-secondary mt-3"
-            disabled={job.isRunning || submitting || !usesMaPresets(strategy)}
+            disabled={job.isRunning || submitting}
             onClick={runWalkForward}
           >
             运行 Walk-Forward
           </button>
-          {!usesMaPresets(strategy) && (
-            <p className="mt-2 text-xs text-slate-500">Walk-Forward 目前仅支持双均线策略。</p>
-          )}
           {wfResult?.segment_count != null && (
-            <p className="mt-2 text-sm text-emerald-400">
-              稳健性 {wfResult.stability_score} · {wfResult.segment_count} 段
-            </p>
+            <div className="mt-2 text-sm text-emerald-400">
+              <p>稳健性 {wfResult.stability_score} · {wfResult.segment_count} 段</p>
+              <p>
+                OOS Sharpe {wfResult.oos_sharpe ?? "—"} · 最大回撤{" "}
+                {wfResult.oos_max_drawdown_pct ?? "—"}% · IS/OOS 衰减{" "}
+                {wfResult.is_oos_decay_pct ?? "—"}%
+              </p>
+              <p>参数漂移 {wfResult.parameter_drift?.mean_distance ?? "—"}</p>
+            </div>
           )}
           {wfSegments.length > 0 && (
             <div className="mt-4">

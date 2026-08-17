@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from qmt_quant.config import ROOT_DIR
@@ -19,6 +20,9 @@ def _collect_artifacts(result: Any, *, paths: Set[str], run_ids: Set[str]) -> No
         result_path = result.get("result_path")
         if result_path:
             paths.add(str(result_path))
+        artifact_dir = result.get("artifact_dir")
+        if artifact_dir:
+            paths.add(str(artifact_dir))
         for value in result.values():
             _collect_artifacts(value, paths=paths, run_ids=run_ids)
     elif isinstance(result, list):
@@ -47,15 +51,23 @@ def _delete_report_files(paths: Iterable[str]) -> List[str]:
                 deleted.append(str(path))
             except OSError:
                 pass
+        elif path and path.is_dir():
+            try:
+                shutil.rmtree(path)
+                deleted.append(str(path))
+            except OSError:
+                pass
     return deleted
 
 
 def _delete_backtest_runs(conn: DbConnection, run_ids: Iterable[str]) -> int:
     count = 0
     for run_id in run_ids:
-        row = conn.execute("SELECT result_path FROM backtest_run WHERE id = %s", (run_id,)).fetchone()
-        if row and row[0]:
-            _delete_report_files([str(row[0])])
+        row = conn.execute(
+            "SELECT result_path, artifact_dir FROM backtest_run WHERE id = %s", (run_id,)
+        ).fetchone()
+        if row:
+            _delete_report_files([str(value) for value in row if value])
         cur = conn.execute("DELETE FROM backtest_run WHERE id = %s", (run_id,))
         count += cur.rowcount
     return count

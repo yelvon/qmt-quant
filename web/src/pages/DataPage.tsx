@@ -119,6 +119,7 @@ export default function DataPage() {
   const [healthCheck, setHealthCheck] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthJob, setHealthJob] = useState<HealthJobState | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
   const healthJobIdRef = useRef<string | null>(null);
   const lastRepairDoneRef = useRef("");
   const summaryRef = useRef<any>(null);
@@ -199,7 +200,12 @@ export default function DataPage() {
   const resumableBars = resumableJobs.find((j) => j.job_type === "sync_bars");
   const resumableFinancial = resumableJobs.find((j) => j.job_type === "sync_financial");
 
-  const qmtBusy = job.isRunning;
+  const qmtBusy =
+    job.isRunning &&
+    (isBarsSyncJob(effectiveJobType) ||
+      isFinancialSyncJob(effectiveJobType) ||
+      isRepairJob(effectiveJobType) ||
+      effectiveJobType === "catalog_export");
   const barsBlocked = qmtBusy && !isBarsSyncJob(effectiveJobType);
   const financialBlocked = qmtBusy && !isFinancialSyncJob(effectiveJobType);
 
@@ -235,6 +241,7 @@ export default function DataPage() {
   const runHealthCheck = useCallback(async () => {
     setHealthLoading(true);
     setHealthJob(null);
+    setHealthError(null);
     try {
       const res = await apiPost<{ job_id: string }>("/api/jobs/data/check", { sector, adjust });
       healthJobIdRef.current = res.job_id;
@@ -244,7 +251,8 @@ export default function DataPage() {
         message: "任务已提交…",
         step: "prepare",
       });
-    } catch {
+    } catch (err) {
+      setHealthError(parseApiError(err instanceof Error ? err.message : String(err)));
       setHealthLoading(false);
       healthJobIdRef.current = null;
     }
@@ -277,6 +285,9 @@ export default function DataPage() {
           setHealthJob(null);
           refreshSummary(true);
         } else if (status === "failed" || status === "cancelled") {
+          if (status === "failed") {
+            setHealthError(String(data.error || data.message || "数据健康检查失败，请稍后重试"));
+          }
           healthJobIdRef.current = null;
           setHealthLoading(false);
         }
@@ -738,6 +749,14 @@ export default function DataPage() {
           repairCancelling={cancelling && repairRunning}
           repairing={repairRunning}
         />
+        {healthError && (
+          <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            健康检查失败：{healthError}
+            <button type="button" className="ml-2 underline" onClick={runHealthCheck}>
+              重试
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -4,13 +4,18 @@ import pandas as pd
 import pytest
 
 
-def test_nautilus_fallback_without_package():
+def test_nautilus_never_silently_falls_back(monkeypatch):
     from qmt_quant.core.validation.nautilus_runner import run_nautilus_validation
 
     idx = pd.date_range("2023-01-01", periods=200, freq="B")
     prices = pd.DataFrame({"600519.SH": 100 + pd.Series(range(200)).values * 0.05}, index=idx)
-    result = run_nautilus_validation(strategy_id="ma_cross", prices=prices, short_window=5, long_window=20)
-    assert result.total_return_pct is not None
+    with pytest.raises(ValueError, match="实验引擎暂不支持"):
+        run_nautilus_validation(
+            strategy_id="unsupported",
+            prices=prices,
+            short_window=5,
+            long_window=20,
+        )
 
 
 def test_validation_engine_label():
