@@ -320,8 +320,31 @@ export function useJobTracker(): JobTrackerValue {
 /** Compact banner shown in Layout while a job is active. */
 export function GlobalJobBanner() {
   const job = useJobTracker();
-  if (!job.jobId) return null;
-  if (!job.isRunning && job.status !== "cancelled") return null;
+  const [others, setOthers] = React.useState<Record<string, unknown>[]>([]);
+
+  const refreshOthers = React.useCallback(() => {
+    apiGet<Record<string, unknown>[]>("/api/jobs?limit=30")
+      .then((jobs) => {
+        const running = jobs.filter((j) => {
+          const status = String(j.status || "");
+          return status === "running" || status === "pending";
+        });
+        setOthers(running);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, []);
+
+  React.useEffect(() => {
+    refreshOthers();
+    const timer = window.setInterval(refreshOthers, 4000);
+    return () => window.clearInterval(timer);
+  }, [refreshOthers, job.status, job.jobId]);
+
+  const focusedVisible = Boolean(job.jobId) && (job.isRunning || job.status === "cancelled");
+  const extra = others.filter((j) => String(j.id || "") !== job.jobId);
+  if (!focusedVisible && extra.length === 0) return null;
 
   const pct = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);
   const typeLabel = jobTypeLabel(job.jobType || inferJobTypeFromMessage(job.message));
@@ -331,25 +354,42 @@ export function GlobalJobBanner() {
   return (
     <div className="border-b border-emerald-900/40 bg-emerald-950/40 px-6 py-2">
       <div className="mx-auto max-w-6xl space-y-1">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
-            {typeLabel}进行中
-          </Link>
-          <span className="min-w-0 flex-1 truncate text-slate-300">
-            {humanizeProgressMessage(job.message) || "运行中…"}
-          </span>
-          <span className="shrink-0 text-slate-400">{pct}%</span>
-          <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
-            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-          </div>
-        </div>
-        {(job.detail || etaLabel) && (
-          <p className="truncate pl-0 text-xs text-slate-500">
-            {job.detail}
-            {job.detail && etaLabel ? " · " : ""}
-            {etaLabel ? `预计剩余 ${etaLabel}` : ""}
-          </p>
+        {focusedVisible && (
+          <>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Link to={dataRoute} className="shrink-0 text-emerald-400 hover:underline">
+                {typeLabel}进行中
+              </Link>
+              <span className="min-w-0 flex-1 truncate text-slate-300">
+                {humanizeProgressMessage(job.message) || "运行中…"}
+              </span>
+              <span className="shrink-0 text-slate-400">{pct}%</span>
+              <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
+                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+            {(job.detail || etaLabel) && (
+              <p className="truncate pl-0 text-xs text-slate-500">
+                {job.detail}
+                {job.detail && etaLabel ? " · " : ""}
+                {etaLabel ? `预计剩余 ${etaLabel}` : ""}
+              </p>
+            )}
+          </>
         )}
+        {extra.map((j) => {
+          const jType = String(j.job_type || "");
+          const jRoute = jobRouteForType(jType);
+          const jLabel = jobTypeLabel(jType);
+          return (
+            <div key={String(j.id)} className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+              <Link to={jRoute} className="text-emerald-500 hover:underline">
+                另有{jLabel}进行中
+              </Link>
+              <span className="truncate">{String(j.progress_message || j.display_name || "")}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

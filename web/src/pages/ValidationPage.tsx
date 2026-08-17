@@ -110,6 +110,7 @@ export default function ValidationPage() {
         from_run: fromRun || undefined,
         match,
         benchmark: "hs300",
+        engine: engine || undefined,
       });
       job.trackJob(res.job_id, "仔细验策略运行中…", "validate");
     } catch (err) {
@@ -140,49 +141,57 @@ export default function ValidationPage() {
 
   const qs = detail?.quantstats;
   const showEmpty = !detail && !validateActive && !pageError;
+  const compactMode = (isSimple || isSingle) && !fromParam;
 
   const validateHistoryOptions = useMemo(
     () => validateHistory.map((r) => ({ id: r.id, label: formatPastRunLabel(r) })),
     [validateHistory]
   );
 
-  if ((isSimple || isSingle) && !fromParam) {
-    return (
-      <div>
-        <BacktestModeSwitch className="mb-4" />
-        <PageCallout>
-          当前为<strong className="font-normal text-slate-200">{isSingle ? "单股回测" : "简单回测"}</strong>
-          模式：一次运行即可在 ③ 策略回测页看到结果。此页用于研究模式下的分步验证。
-        </PageCallout>
-        <EmptyState
-          title={isSingle ? "单股模式下请使用 ③ 策略回测" : "简单模式下请使用 ③ 策略回测"}
-          description={
-            isSingle
-              ? "搜索股票并点「运行回测」，即可查看该股策略净值与成交明细。"
-              : "点一次「运行回测」即可完成参数筛选与 A 股规则验证，无需单独来本页。"
-          }
-          actionLabel="去策略回测"
-          actionTo="/research"
-        />
-        <p className="mt-4 text-center text-sm text-slate-500">
-          需要分步扫描参数、Walk-Forward 或手动挑组合验证？
-          <button type="button" className="ml-1 text-emerald-400 underline" onClick={() => setMode("research")}>
-            切换到研究扫描模式
-          </button>
-        </p>
-      </div>
-    );
-  }
+  const [engine, setEngine] = useState("");
+  const [engineOptions, setEngineOptions] = useState<{ id: string; label: string }[]>([]);
+  const [engineHint, setEngineHint] = useState("");
+
+  useEffect(() => {
+    apiGet<{ current: string; current_label: string; options: { id: string; label: string }[] }>(
+      "/api/options/validation-engines"
+    )
+      .then((data) => {
+        setEngineOptions(data.options || []);
+        setEngine(data.current || "custom");
+        setEngineHint(data.current_label || "");
+      })
+      .catch(() => {
+        setEngine("custom");
+      });
+  }, []);
 
   return (
     <div>
       <BacktestModeSwitch className="mb-4" />
 
-      <PageCallout>
-        仔细验策略：A 股 T+1、整手、费率规则。与 ③ 扫描结果对比，给出「可以采用 / 建议复核」。
-      </PageCallout>
+      {compactMode && (
+        <PageCallout>
+          当前为<strong className="font-normal text-slate-200">{isSingle ? "单股回测" : "简单回测"}</strong>
+          模式：一次运行即可在 ③ 看净值。本页仍可查看历史验证，或
+          <button type="button" className="mx-1 text-emerald-400 underline" onClick={() => setMode("research")}>
+            切换到研究扫描
+          </button>
+          做分步验证。
+          <Link to="/research" className="ml-2 text-emerald-400 underline">
+            去策略回测
+          </Link>
+        </PageCallout>
+      )}
 
-      <div className="card grid gap-3 md:grid-cols-2">
+      {!compactMode && (
+        <PageCallout>
+          仔细验策略：A 股 T+1、整手、费率规则。与 ③ 扫描结果对比，给出「可以采用 / 建议复核」。
+          当前引擎：{engineHint || "A 股规则引擎"}。
+        </PageCallout>
+      )}
+
+      <div className="card mt-4 grid gap-3 md:grid-cols-2">
         <PresetSelect
           label="选择③的结果"
           value={fromRun}
@@ -198,7 +207,19 @@ export default function ValidationPage() {
           ]}
           onChange={setMatch}
         />
+        <PresetSelect
+          label="验证引擎"
+          value={engine}
+          options={engineOptions.length ? engineOptions : [{ id: "custom", label: "A 股规则引擎" }]}
+          onChange={setEngine}
+        />
       </div>
+
+      {engine === "nautilus" && (
+        <p className="mt-2 text-xs text-amber-300/90">
+          Nautilus MVP 仅支持双均线，且实质只验证组合中的第一只标的；其它策略会回落到 A 股规则引擎。
+        </p>
+      )}
 
       {fromRun && researchPreview?.best && (
         <p className="mt-2 text-xs text-slate-500">
@@ -269,6 +290,7 @@ export default function ValidationPage() {
             comparison={detail.comparison}
             verdict={detail.verdict}
             totalReturnPct={detail.total_return_pct}
+            engineLabel={detail.engine_label || engineHint}
           />
           <div className="card">
             <p className="text-sm text-slate-400">

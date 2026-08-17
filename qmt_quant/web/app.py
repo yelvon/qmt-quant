@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from qmt_quant.adapters.qmt.client import normalize_code
-from qmt_quant.config import get_settings
+from qmt_quant.config import ROOT_DIR, get_settings
 from qmt_quant.core.data.kline import build_kline_payload
 from qmt_quant.core.data.query import get_date_range, list_available_adjust_types, query_table
 from qmt_quant.core.data.table_meta import get_table_meta, list_tables
@@ -37,13 +37,21 @@ from qmt_quant.core.research.presets import (
     RANGE_PRESETS,
     SHORT_MA_PRESETS,
 )
+from qmt_quant.core.research.universe import describe_research_universe
+from qmt_quant.core.screener.dsl import parse_rule_yaml
 from qmt_quant.core.screener.templates import TEMPLATES
 from qmt_quant.core.sync.check import run_data_check, run_data_summary
-from qmt_quant.core.trade.service import get_trade_status, preview_signal_orders, submit_orders
+from qmt_quant.core.trade.service import (
+    flatten_trade_orders,
+    get_trade_status,
+    preview_signal_orders,
+    submit_orders,
+)
+from qmt_quant.core.validation.engine import validation_engine_display_name
+from qmt_quant.web.status_helpers import build_status_actions, has_strategy_run
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, list_jobs
 from qmt_quant.web.auth import require_api_token
-from qmt_quant.web.status_helpers import build_status_actions
 
 
 def _body_codes(code: Optional[str]) -> Optional[List[str]]:
@@ -120,6 +128,7 @@ class ValidateBody(BaseModel):
     benchmark: str = "hs300"
     screen_run_id: Optional[str] = None
     code: Optional[str] = None
+    engine: Optional[str] = None
 
 
 class BacktestBody(BaseModel):
@@ -142,7 +151,10 @@ class ScreenBody(BaseModel):
     exclude_st: bool = True
     pe_max: Optional[float] = None
     roe_min: Optional[float] = None
+    ma_window: Optional[int] = None
+    list_days_lt: Optional[int] = None
     rule_path: Optional[str] = None
+    rule_yaml: Optional[str] = None
 
 
 class ScreenBacktestBody(BaseModel):
@@ -161,18 +173,26 @@ class SettingsBody(BaseModel):
     commission_rate: Optional[float] = None
     stamp_tax_rate: Optional[float] = None
     sync_auto_repair: Optional[bool] = None
+    validation_engine: Optional[str] = None
 
 
 class WatchlistBody(BaseModel):
     codes: List[str] = Field(default_factory=list)
 
 
+class TradeOrderItem(BaseModel):
+    code: str
+    side: str = "buy"
+    quantity: int = 100
+
+
 class TradeBody(BaseModel):
-    codes: List[str]
+    codes: List[str] = Field(default_factory=list)
     side: str = "buy"
     quantity: int = 100
     live: bool = False
     confirm: Optional[str] = None
+    orders: Optional[List[TradeOrderItem]] = None
 
 
 class JobManager:
@@ -279,6 +299,7 @@ def create_app() -> FastAPI:
             "suggestion": suggestion,
             "actions": actions,
             "onboarding_complete": doctor.ok and coverage > 80,
+            "has_strategy_run": has_strategy_run(),
         }
 
     @app.get("/api/doctor")
@@ -633,6 +654,7 @@ def create_app() -> FastAPI:
                 "benchmark": body.benchmark,
                 "screen_run_id": body.screen_run_id,
                 "codes": codes,
+                "engine": body.engine,
             },
         )
         return {"job_id": job_id}
@@ -656,6 +678,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/screen")
     def job_screen(body: ScreenBody) -> Dict[str, str]:
+        if body.rule_yaml:
+            try:
+                parse_rule_yaml(body.rule_yaml)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"YAML 规则无效：{exc}") from exc
         job_id = submit_job(
             display_name="选股",
             job_type="screen",
@@ -667,7 +694,10 @@ def create_app() -> FastAPI:
                 "exclude_st": body.exclude_st,
                 "pe_max": body.pe_max,
                 "roe_min": body.roe_min,
+                "ma_window": body.ma_window,
+                "list_days_lt": body.list_days_lt,
                 "rule_path": body.rule_path,
+                "rule_yaml": body.rule_yaml,
             },
         )
         return {"job_id": job_id}
@@ -803,6 +833,26 @@ def create_app() -> FastAPI:
             {"id": "screening_rebalance", "label": "选股调仓"},
         ]
 
+    @app.get("/api/options/research-universe")
+    def options_research_universe(
+        sector: str = "沪深A股",
+        strategy: str = "ma_cross",
+    ) -> Dict[str, Any]:
+        return describe_research_universe(sector=sector, strategy_id=strategy)
+
+    @app.get("/api/options/validation-engines")
+    def options_validation_engines() -> Dict[str, Any]:
+        settings = get_settings()
+        current = settings.validation_engine or "custom"
+        return {
+            "current": current,
+            "current_label": validation_engine_display_name(current),
+            "options": [
+                {"id": "custom", "label": validation_engine_display_name("custom")},
+                {"id": "nautilus", "label": validation_engine_display_name("nautilus")},
+            ],
+        }
+
     @app.get("/api/options/ranges")
     def options_ranges() -> List[Dict[str, str]]:
         return [{"id": k, "label": v["label"]} for k, v in RANGE_PRESETS.items()]
@@ -821,6 +871,21 @@ def create_app() -> FastAPI:
     @app.get("/api/options/templates")
     def options_templates() -> List[Dict[str, str]]:
         return [{"id": k, "label": v.name} for k, v in TEMPLATES.items()]
+
+    @app.get("/api/options/rule-presets")
+    def options_rule_presets() -> List[Dict[str, Any]]:
+        rules_dir = ROOT_DIR / "strategies" / "rules"
+        items: List[Dict[str, str]] = []
+        if rules_dir.is_dir():
+            for path in sorted(rules_dir.glob("*.yaml")):
+                items.append(
+                    {
+                        "id": str(path.relative_to(ROOT_DIR)).replace("\\", "/"),
+                        "label": path.stem,
+                        "yaml": path.read_text(encoding="utf-8"),
+                    }
+                )
+        return items
 
     @app.get("/api/options/research-runs")
     def options_research_runs() -> List[Dict[str, Any]]:
@@ -932,6 +997,11 @@ def create_app() -> FastAPI:
             s.stamp_tax_rate = body.stamp_tax_rate
         if body.sync_auto_repair is not None:
             s.sync_auto_repair = body.sync_auto_repair
+        if body.validation_engine is not None:
+            engine = body.validation_engine.strip().lower()
+            if engine not in ("custom", "nautilus"):
+                raise HTTPException(status_code=400, detail="validation_engine 须为 custom 或 nautilus")
+            s.validation_engine = engine
         s.save()
         from qmt_quant import config
 
@@ -944,13 +1014,30 @@ def create_app() -> FastAPI:
 
     @app.post("/api/trade/preview")
     def api_trade_preview(body: TradeBody) -> List[Dict[str, Any]]:
-        return preview_signal_orders(body.codes, body.side, body.quantity)
+        raw_orders = None
+        if body.orders:
+            raw_orders = [
+                o.model_dump() if hasattr(o, "model_dump") else o.dict()  # type: ignore[attr-defined]
+                for o in body.orders
+            ]
+        return preview_signal_orders(body.codes, body.side, body.quantity, orders=raw_orders)
 
     @app.post("/api/trade/submit")
     def api_trade_submit(body: TradeBody) -> List[Dict[str, Any]]:
         if body.live and body.confirm != "LIVE":
             raise HTTPException(status_code=403, detail="live orders require confirm=LIVE")
-        orders = preview_signal_orders(body.codes, body.side, body.quantity)
+        raw_orders = None
+        if body.orders:
+            raw_orders = [
+                o.model_dump() if hasattr(o, "model_dump") else o.dict()  # type: ignore[attr-defined]
+                for o in body.orders
+            ]
+        orders = flatten_trade_orders(
+            codes=body.codes,
+            side=body.side,
+            quantity=body.quantity,
+            orders=raw_orders,
+        )
         return submit_orders(orders, live=body.live)
 
     @app.websocket("/ws/jobs")

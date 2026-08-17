@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `/api/status.has_strategy_run`：引导第三步「试策略」按是否已有回测/验证记录勾选
+- `GET /api/options/research-universe`：提交前展示股票池规模 vs 实际回测只数（上限仍 50）
+- `GET /api/options/validation-engines`；验证页可选引擎；设置页可保存 `validation_engine`（默认仍 custom）
+- 选股表单透传均线窗口 / 上市天数；YAML 可编辑；`rule_yaml` 非法返回 400
+- 实盘预览走风控；`TradeBody.orders[]`；页面展示持仓/资金，支持买卖与手数
 - PostgreSQL 存储层：`docker-compose.yml`、`data.db_url` / `DATABASE_URL`、Greenfield PG schema
 - `docs/postgres-setup.md`；doctor「PostgreSQL 可达」检查
 - 一键启动脚本（`start.bat` / `scripts/start.sh`）会自动 `docker compose up -d` 拉起 PostgreSQL；**若容器已在运行则不会重启**
@@ -42,6 +47,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- 顶栏 ①–⑥ 编号固定，不再随回测模式改序号或隐藏 ④
+- 总览一键跑通步骤跟随 `job.step`；简单模式完成 CTA 去 ③
+- 简单/单股模式打开 ④ 仍可看历史验证，不再整页拦截
+- 任务横幅叠加展示其它 running 任务；任务记录有运行中任务时轮询
 - **Breaking**：移除 SQLite；所有读写改 PostgreSQL（`psycopg`），旧 `.db` 不迁移，需重新同步
 - 合并迁移为 PG 版 `migrations/001_init.sql`；CI pytest 依赖 postgres service
 - CORS 默认仅本地 Vite 源（`web.cors_origins`）
@@ -55,6 +64,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- 选股结果代码可跳转 K 线；数据浏览支持 `?tab=&code=`
+- Walk-Forward 非双均线时按钮禁用并说明原因
 - Validation 落库 engine 误标 `nautilus` → 按实际引擎 `custom_validator` / `nautilus`
 - QMT job 在 quant-env Web 下强制 subprocess 到 qmt-env（当配置了 qmt_python）
 - Validation `next_open` 使用下一根 K 线开盘价

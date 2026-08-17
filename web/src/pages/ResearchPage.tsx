@@ -53,6 +53,13 @@ export default function ResearchPage() {
   const [historyRunId, setHistoryRunId] = useState("");
   const [historyValidateId, setHistoryValidateId] = useState("");
 
+  const [universeInfo, setUniverseInfo] = useState<{
+    pool_size: number;
+    used: number;
+    capped: boolean;
+    cap: number | null;
+  } | null>(null);
+
   const [result, setResult] = useState<any>(null);
   const [runId, setRunId] = useState("");
   const [validateDetail, setValidateDetail] = useState<any>(null);
@@ -113,6 +120,18 @@ export default function ResearchPage() {
       .catch(() => setValidateHistory([]));
     return () => window.removeEventListener("focus", loadSectors);
   }, []);
+
+  useEffect(() => {
+    if (!isPool) {
+      setUniverseInfo(null);
+      return;
+    }
+    apiGet<{ pool_size: number; used: number; capped: boolean; cap: number | null }>(
+      `/api/options/research-universe?sector=${encodeURIComponent(sector)}&strategy=${encodeURIComponent(strategy)}`
+    )
+      .then(setUniverseInfo)
+      .catch(() => setUniverseInfo(null));
+  }, [sector, strategy, isPool]);
 
   const loadResearchDetail = useCallback(async (id: string) => {
     const res = await apiGet<any>(`/api/research/${id}`);
@@ -455,16 +474,27 @@ export default function ResearchPage() {
         )}
       </div>
 
-      {isPool && sector === "watchlist" && (
+      {isPool && universeInfo?.capped && (
+        <p className="mt-2 text-xs text-amber-300/90">
+          股票池共 {universeInfo.pool_size} 只，本次回测/扫描只取前 {universeInfo.used} 只（上限 {universeInfo.cap}）。
+          {sector === "watchlist" ? (
+            <>
+              <Link to="/data#watchlist" className="ml-1 underline hover:text-slate-200">
+                编辑自选池
+              </Link>
+            </>
+          ) : (
+            " 若要指定标的，请改用自选池或单股回测。"
+          )}
+        </p>
+      )}
+      {isPool && sector === "watchlist" && !universeInfo?.capped && (
         <p className="mt-2 text-xs text-slate-500">
           当前使用
           <Link to="/data#watchlist" className="mx-1 underline hover:text-slate-300">
             我的自选池
           </Link>
-          中的股票（回测最多取前 50 只）。
-          <Link to="/data#watchlist" className="ml-1 underline hover:text-slate-300">
-            编辑自选池 →
-          </Link>
+          。
         </p>
       )}
 
@@ -582,6 +612,9 @@ export default function ResearchPage() {
           >
             运行 Walk-Forward
           </button>
+          {!usesMaPresets(strategy) && (
+            <p className="mt-2 text-xs text-slate-500">Walk-Forward 目前仅支持双均线策略。</p>
+          )}
           {wfResult?.segment_count != null && (
             <p className="mt-2 text-sm text-emerald-400">
               稳健性 {wfResult.stability_score} · {wfResult.segment_count} 段

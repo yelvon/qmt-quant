@@ -137,7 +137,7 @@ export default function DataHealthPanel({
             {barMin && barMax ? `${barMin} ~ ${barMax}` : barMax || barMin || "—"}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            <Link to="/data/browse" className="text-emerald-400 hover:underline">
+            <Link to="/data/browse?tab=cross_section" className="text-emerald-400 hover:underline">
               在数据浏览中查看
             </Link>
             {" · "}

@@ -37,6 +37,7 @@ export default function SettingsPage() {
       commission_rate: settings.backtest?.commission_rate,
       stamp_tax_rate: settings.backtest?.stamp_tax_rate,
       sync_auto_repair: settings.data?.sync?.auto_repair,
+      validation_engine: settings.backtest?.validation_engine,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -135,6 +136,20 @@ export default function SettingsPage() {
           />
           增量同步后自动修复数据缺口
         </label>
+        <div>
+          <label className="label">验证引擎（④ 仔细验策略默认）</label>
+          <select
+            className="input w-full"
+            value={settings.backtest?.validation_engine || "custom"}
+            onChange={(e) => patch(["backtest", "validation_engine"], e.target.value)}
+          >
+            <option value="custom">A 股规则引擎</option>
+            <option value="nautilus">高保真引擎（Nautilus MVP）</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            默认保持 A 股规则引擎。Nautilus MVP 仅双均线，且只验证组合中第一只标的。
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-primary" onClick={save}>
             保存设置

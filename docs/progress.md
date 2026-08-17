@@ -83,7 +83,7 @@
 | TR-002 | Order placement | Done |
 | TR-003 | Query positions/orders | Done |
 | TR-004 | Risk controls | Done |
-| TR-005 | Signal execution | Partial |
+| TR-005 | Signal execution | Partial（选股结果可生成可改手数的买卖单并预览风控；仍无策略自动跟单） |
 | TR-006 | dry_run default | Done |
 
 ## Built-in Strategies
@@ -111,7 +111,13 @@
 
 | Item | Status |
 |------|--------|
-| 导航 ①–⑥ + 次要入口 | Done |
+| 导航 ①–⑥ 编号固定（不随模式改） | Done |
+| 总览 pipeline 用 job.step；引导第三步可完成 | Done |
+| 研究宇宙 50 只截断提示 | Done |
+| 验证引擎可见 / 可选 | Done |
+| 选股 YAML 可编辑 + K 线/IC 闭环 | Done |
+| 任务横幅多 running + Jobs 轮询 | Done |
+| 实盘 orders[] + 持仓展示 | Done |
 | 总览行动卡片 + onboarding | Done |
 | 数据健康人话面板 | Done |
 | ④ ③vs④ 对比 + CTA | Done |

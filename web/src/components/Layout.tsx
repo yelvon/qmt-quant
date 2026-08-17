@@ -1,20 +1,15 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { BacktestModeProvider, useBacktestMode } from "../lib/backtestMode";
+import { BacktestModeProvider } from "../lib/backtestMode";
 import { GlobalJobBanner, JobProvider } from "../lib/JobProvider";
 
 function NavLinks() {
-  const { isSimple, isSingle } = useBacktestMode();
-  const compactNav = isSimple || isSingle;
-
   const mainLinks = [
     { to: "/", label: "① 总览" },
     { to: "/data", label: "② 准备数据" },
-    { to: "/research", label: compactNav ? "③ 策略回测" : "③ 快速试策略" },
-    ...(compactNav
-      ? []
-      : [{ to: "/validation", label: "④ 仔细验策略" } as const]),
-    { to: "/screening", label: compactNav ? "④ 选股" : "⑤ 选股" },
-    { to: "/live", label: compactNav ? "⑤ 实盘" : "⑥ 实盘" },
+    { to: "/research", label: "③ 快速试策略" },
+    { to: "/validation", label: "④ 仔细验策略" },
+    { to: "/screening", label: "⑤ 选股" },
+    { to: "/live", label: "⑥ 实盘" },
   ];
 
   const secondaryLinks = [

@@ -16,6 +16,7 @@ def test_status(client):
     assert "actions" in data
     assert isinstance(data["actions"], list)
     assert "onboarding_complete" in data
+    assert isinstance(data.get("has_strategy_run"), bool)
 
 
 def test_doctor(client):
@@ -106,3 +107,39 @@ def test_data_dates(client):
     res = client.get("/api/data/dates?adjust=front")
     assert res.status_code == 200
     assert "min_date" in res.json()
+
+
+def test_research_universe_endpoint(client, monkeypatch):
+    codes = [f"{i:06d}.SH" for i in range(80)]
+    monkeypatch.setattr(
+        "qmt_quant.core.research.universe.resolve_universe",
+        lambda sector="沪深A股": codes,
+    )
+    res = client.get("/api/options/research-universe?sector=沪深A股&strategy=ma_cross")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["pool_size"] == 80
+    assert data["used"] == 50
+    assert data["capped"] is True
+    assert data["cap"] == 50
+
+
+def test_validation_engines_endpoint(client):
+    res = client.get("/api/options/validation-engines")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["current"]
+    assert any(o["id"] == "custom" for o in data["options"])
+
+
+def test_screen_invalid_yaml(client):
+    res = client.post("/api/jobs/screen", json={"rule_yaml": "- just a list"})
+    assert res.status_code == 400
+
+
+def test_trade_live_requires_confirm(client):
+    res = client.post(
+        "/api/trade/submit",
+        json={"codes": ["600519.SH"], "live": True},
+    )
+    assert res.status_code == 403

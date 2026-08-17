@@ -38,3 +38,18 @@ def test_parse_rule_ma_bullish():
     )
     assert rule.ma_bullish is True
     assert rule.ma_window == 30
+
+
+def test_parse_rule_yaml_object():
+    from qmt_quant.core.screener.dsl import parse_rule_yaml
+
+    rule = parse_rule_yaml("name: t\nfilters:\n  - field: pe_ttm\n    op: \"<\"\n    value: 20\n")
+    assert rule.pe_max == 20
+
+
+def test_parse_rule_yaml_rejects_list():
+    from qmt_quant.core.screener.dsl import parse_rule_yaml
+    import pytest
+
+    with pytest.raises(ValueError):
+        parse_rule_yaml("- a\n- b\n")

@@ -131,6 +131,7 @@ def run_research(
         )
     result["run_id"] = run_id
     result["result_path"] = str(result_path)
+    result["universe_used"] = len(used_codes)
     return result
 
 

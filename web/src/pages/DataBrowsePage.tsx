@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import PageCallout from "../components/PageCallout";
 import PresetSelect from "../components/PresetSelect";
 import DataTable from "../components/DataTable";
@@ -26,11 +26,18 @@ const ADJUST_FALLBACK = [
 ];
 
 export default function DataBrowsePage() {
-  const [tab, setTab] = useState<TabId>("kline");
+  const [params] = useSearchParams();
+  const tabParam = params.get("tab");
+  const codeParam = params.get("code") || "";
+  const initialTab: TabId =
+    tabParam === "cross_section" || tabParam === "series" || tabParam === "kline"
+      ? tabParam
+      : "kline";
+  const [tab, setTab] = useState<TabId>(initialTab);
   const [meta, setMeta] = useState<TableMeta | null>(null);
   const [adjust, setAdjust] = useState("front");
   const [date, setDate] = useState("");
-  const [code, setCode] = useState("600519.SH");
+  const [code, setCode] = useState(codeParam || "600519.SH");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [dateMin, setDateMin] = useState<string | null>(null);
@@ -369,7 +376,21 @@ export default function DataBrowsePage() {
 
       {(tab === "cross_section" || tab === "series") && (
         <div className="card">
-          {error && <p className="mb-3 text-sm text-red-300">{error}</p>}
+          {error && (
+            <p className="mb-3 text-sm text-red-300">
+              {error}
+              {(error.includes("无数据") || error.includes("empty") || error.toLowerCase().includes("no ")) && (
+                <>
+                  {" "}
+                  当前复权可能尚未同步，请到{" "}
+                  <Link to="/data" className="text-emerald-300 underline">
+                    ② 准备数据
+                  </Link>{" "}
+                  按该复权方式同步。
+                </>
+              )}
+            </p>
+          )}
           {query ? (
             <DataTable
               columns={query.columns}

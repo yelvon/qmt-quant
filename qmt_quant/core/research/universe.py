@@ -32,6 +32,39 @@ def resolve_research_universe(
     return list(universe) if universe else []
 
 
+def describe_research_universe(
+    *,
+    sector: str = "沪深A股",
+    strategy_id: str = "ma_cross",
+    codes: Optional[List[str]] = None,
+    screen_run_id: Optional[str] = None,
+) -> dict:
+    """Pool size vs actual research/backtest size (does not change sampling)."""
+    if screen_run_id:
+        pool = load_codes_by_run_id(screen_run_id)
+    elif codes:
+        pool = list(codes)
+    else:
+        pool = resolve_universe(sector)
+        if sector in ("watchlist", "我的自选池"):
+            pool = resolve_universe("watchlist")
+    pool = list(pool or [])
+    used = resolve_research_universe(
+        sector=sector,
+        strategy_id=strategy_id,
+        codes=codes,
+        screen_run_id=screen_run_id,
+    )
+    cap = None if strategy_id == "screening_rebalance" else RESEARCH_UNIVERSE_CAP
+    used_n = len(used)
+    return {
+        "pool_size": len(pool),
+        "used": used_n,
+        "capped": cap is not None and len(pool) > used_n,
+        "cap": cap,
+    }
+
+
 def universe_from_research_run(research: dict) -> Optional[List[str]]:
     """Resolve validation universe from a saved research backtest_run row."""
     params = research.get("params") or {}

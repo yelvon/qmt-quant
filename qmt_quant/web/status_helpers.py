@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from qmt_quant.storage.database import db_session
+
 
 def build_status_actions(
     *,
@@ -67,3 +69,20 @@ def build_status_actions(
         )
 
     return actions[:3]
+
+
+def has_strategy_run() -> bool:
+    """True when the user has completed a research/backtest/validate run."""
+    with db_session() as conn:
+        row = conn.execute("SELECT 1 FROM backtest_run LIMIT 1").fetchone()
+        if row:
+            return True
+        row = conn.execute(
+            """
+            SELECT 1 FROM job
+            WHERE status = 'completed'
+              AND job_type IN ('research', 'backtest', 'validate', 'walk_forward')
+            LIMIT 1
+            """
+        ).fetchone()
+        return row is not None

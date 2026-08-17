@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
+import { useBacktestMode } from "../lib/backtestMode";
 import { useJobTracker } from "../lib/useJobTracker";
+import { jobRouteForType } from "../lib/jobTypes";
 import PageCallout from "../components/PageCallout";
 import JobProgressBar from "../components/JobProgressBar";
 import ActionCard from "../components/ActionCard";
@@ -11,14 +14,27 @@ import { jobStatusLabel } from "../lib/errorMessages";
 
 type Action = { id: string; label: string; route: string; reason: string };
 
+function mapDashboardAction(action: Action, compact: boolean): Action {
+  if (compact && action.id === "validate") {
+    return {
+      ...action,
+      label: "去策略回测",
+      route: "/research",
+      reason: "当前为简单/单股模式，一次运行即可看净值；分步验证请切到研究扫描。",
+    };
+  }
+  return action;
+}
+
 export default function DashboardPage() {
   const [status, setStatus] = useState<any>(null);
-  const [step, setStep] = useState("");
-  const [stepLabel, setStepLabel] = useState("");
   const [hideOnboarding, setHideOnboarding] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const { isSimple, isSingle, isResearch } = useBacktestMode();
+  const compact = isSimple || isSingle;
 
   const job = useJobTracker();
+  const pipelineActive = Boolean(job.jobId) && (job.jobType === "pipeline" || job.message.includes("一键跑通"));
 
   const refresh = () => apiGet("/api/status").then(setStatus);
   useEffect(() => {
@@ -29,28 +45,27 @@ export default function DashboardPage() {
     if (job.status === "completed") refresh();
   }, [job.status]);
 
-  useEffect(() => {
-    if (job.message && job.status === "running") {
-      if (job.message.includes("更新数据") || job.message.includes("同步")) {
-        setStep("sync");
-        setStepLabel(job.message);
-      }
-    }
-  }, [job.message, job.status]);
-
   async function runPipeline() {
     setPipelineError(null);
     try {
       const res = await apiPost<{ job_id: string }>("/api/jobs/pipeline");
       job.trackJob(res.job_id, "一键跑通：更新数据", "pipeline");
-      setStep("sync");
-      setStepLabel("更新数据");
     } catch (err) {
       setPipelineError(err instanceof Error ? err.message : String(err));
     }
   }
 
-  const actions: Action[] = status?.actions || [];
+  const actions: Action[] = useMemo(
+    () => (status?.actions || []).map((a: Action) => mapDashboardAction(a, compact)),
+    [status?.actions, compact]
+  );
+
+  const completeAction =
+    pipelineActive && job.status === "completed"
+      ? isResearch
+        ? { label: "查看验证结果", to: "/validation" }
+        : { label: "查看回测结果", to: "/research" }
+      : undefined;
 
   return (
     <div>
@@ -58,6 +73,7 @@ export default function DashboardPage() {
         <OnboardingChecklist
           doctorOk={status?.doctor_ok}
           coverage={status?.data_check?.bar_coverage_pct}
+          hasStrategyRun={status?.has_strategy_run}
           onDismiss={() => setHideOnboarding(true)}
         />
       )}
@@ -87,8 +103,8 @@ export default function DashboardPage() {
         {pipelineError && <p className="mt-2 text-sm text-red-300">{pipelineError}</p>}
         {job.jobId && (
           <>
-            {stepLabel && <p className="mt-2 text-sm text-slate-400">{stepLabel}</p>}
-            <StepProgress currentStep={step} progress={job.progress} />
+            {job.message && <p className="mt-2 text-sm text-slate-400">{job.message}</p>}
+            <StepProgress currentStep={job.step} progress={job.progress} />
             <JobProgressBar
               progress={job.progress}
               status={job.status}
@@ -99,11 +115,7 @@ export default function DashboardPage() {
               detail={job.detail}
               etaSeconds={job.etaSeconds}
               onCancel={job.isRunning ? () => job.cancelJob() : undefined}
-              completeAction={
-                job.status === "completed"
-                  ? { label: "查看验证结果", to: "/validation" }
-                  : undefined
-              }
+              completeAction={completeAction}
             />
           </>
         )}
@@ -114,7 +126,9 @@ export default function DashboardPage() {
         <ul className="space-y-1 text-sm text-slate-300">
           {(status?.recent_jobs || []).map((j: any) => (
             <li key={j.id} className="flex items-center gap-2">
-              <span>{j.display_name}</span>
+              <Link to={jobRouteForType(j.job_type || "")} className="text-emerald-400 hover:underline">
+                {j.display_name}
+              </Link>
               <StatusBadge ok={j.status === "completed"} label={jobStatusLabel(j.status)} />
             </li>
           ))}

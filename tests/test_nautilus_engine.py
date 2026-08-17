@@ -20,6 +20,17 @@ def test_validation_engine_label():
     assert validation_engine_label("nautilus") == "nautilus"
 
 
+def test_get_validation_engine_none_uses_settings(monkeypatch):
+    from qmt_quant.core.validation import engine as eng
+
+    class _S:
+        validation_engine = "custom"
+
+    monkeypatch.setattr(eng, "get_settings", lambda: _S())
+    got = eng.get_validation_engine(None)
+    assert isinstance(got, eng.CustomValidationEngine)
+
+
 @pytest.mark.skipif(
     pytest.importorskip("nautilus_trader", reason="nautilus not installed") is None,
     reason="nautilus",

@@ -517,7 +517,7 @@ export default function DataPage() {
           <span className="text-slate-300">
             本地日线：
             {hasLocalBars ? (
-              <Link to="/data/browse" className="ml-1 font-mono text-emerald-300 hover:underline">
+              <Link to="/data/browse?tab=cross_section" className="ml-1 font-mono text-emerald-300 hover:underline">
                 {formatLocalRange(summary?.bar_date_min, summary?.bar_date_max)}
               </Link>
             ) : (
@@ -623,7 +623,7 @@ export default function DataPage() {
             message={job.message || activePlanSummary}
             completeAction={
               job.status === "completed"
-                ? { label: "查看已同步数据", to: "/data/browse" }
+                ? { label: "查看已同步数据", to: "/data/browse?tab=cross_section" }
                 : undefined
             }
           />

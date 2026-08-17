@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiDelete, apiGet, apiPost } from "../lib/api";
 import PageCallout from "../components/PageCallout";
 import StatusBadge from "../components/StatusBadge";
 import TechnicalDetails from "../components/TechnicalDetails";
 import { humanizeError, jobStatusLabel } from "../lib/errorMessages";
+import { jobRouteForType } from "../lib/jobTypes";
 
 function resultSummary(job: any): string {
   const r = job.result_json;
@@ -28,6 +30,13 @@ export default function JobsPage() {
   useEffect(() => {
     load();
   }, []);
+
+  const hasActive = jobs.some((j) => ACTIVE_STATUSES.has(j.status));
+  useEffect(() => {
+    if (!hasActive) return;
+    const timer = window.setInterval(load, 2000);
+    return () => window.clearInterval(timer);
+  }, [hasActive]);
 
   async function retry(jobId: string) {
     setRetrying(jobId);
@@ -102,7 +111,11 @@ export default function JobsPage() {
             {jobs.map((j) => (
               <React.Fragment key={j.id}>
                 <tr className="border-t border-slate-800">
-                  <td className="p-2">{j.display_name}</td>
+                  <td className="p-2">
+                    <Link className="text-emerald-400 hover:underline" to={jobRouteForType(j.job_type || "")}>
+                      {j.display_name}
+                    </Link>
+                  </td>
                   <td>
                     <StatusBadge
                       ok={j.status === "completed"}

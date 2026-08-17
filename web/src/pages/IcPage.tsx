@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiGet, apiPost } from "../lib/api";
 import { fetchJobRecord, resultFromJobRecord } from "../lib/jobResult";
 import { isIcJob } from "../lib/jobTypes";
@@ -10,11 +11,12 @@ import TechnicalDetails from "../components/TechnicalDetails";
 import EmptyState from "../components/EmptyState";
 
 export default function IcPage() {
+  const [params] = useSearchParams();
   const job = useJobTracker();
   const icActive = Boolean(job.jobId) && isIcJob(job.jobType);
 
-  const [template, setTemplate] = useState("low_pe");
-  const [sector, setSector] = useState("沪深A股");
+  const [template, setTemplate] = useState(params.get("template") || "low_pe");
+  const [sector, setSector] = useState(params.get("sector") || "沪深A股");
   const [templates, setTemplates] = useState<{ id: string; label: string }[]>([]);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [result, setResult] = useState<any>(null);

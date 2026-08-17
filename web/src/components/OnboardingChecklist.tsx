@@ -13,6 +13,7 @@ type Step = {
 type Props = {
   doctorOk?: boolean;
   coverage?: number;
+  hasStrategyRun?: boolean;
   onDismiss?: () => void;
 };
 
@@ -24,11 +25,16 @@ export function dismissOnboarding(): void {
   localStorage.setItem(ONBOARDING_KEY, "1");
 }
 
-export default function OnboardingChecklist({ doctorOk, coverage = 0, onDismiss }: Props) {
+export default function OnboardingChecklist({
+  doctorOk,
+  coverage = 0,
+  hasStrategyRun = false,
+  onDismiss,
+}: Props) {
   const steps: Step[] = [
     { id: "env", label: "配置 QMT 与 Python 环境", route: "/settings", done: !!doctorOk },
     { id: "data", label: "同步近 3 年日线数据", route: "/data", done: coverage > 80 },
-    { id: "research", label: "试默认双均线策略", route: "/research", done: false },
+    { id: "research", label: "试默认双均线策略", route: "/research", done: !!hasStrategyRun },
   ];
   const allDone = steps.every((s) => s.done);
 

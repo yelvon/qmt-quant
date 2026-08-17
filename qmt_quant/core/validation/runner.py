@@ -13,7 +13,7 @@ from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.report import build_quantstats_summary
 from qmt_quant.core.research.universe import universe_from_research_run
 from qmt_quant.core.validation.compare import compare_with_research
-from qmt_quant.core.validation.engine import get_validation_engine, validation_engine_label
+from qmt_quant.core.validation.engine import get_validation_engine, validation_engine_display_name, validation_engine_label
 from qmt_quant.core.validation.per_stock import compute_per_stock_returns
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, save_backtest_run
@@ -140,6 +140,7 @@ def run_validation(
         "trades": [t.__dict__ for t in result.trades[:20]],
         "quantstats": quantstats,
         "engine": engine_label,
+        "engine_label": validation_engine_display_name(engine_name),
         "codes": resolved_codes,
     }
     if stock_returns:

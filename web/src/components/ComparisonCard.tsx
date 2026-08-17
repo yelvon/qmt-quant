@@ -13,6 +13,7 @@ type Props = {
   verdict?: string;
   totalReturnPct?: number;
   variant?: "simple" | "research";
+  engineLabel?: string;
 };
 
 function verdictColor(v: string) {
@@ -26,6 +27,7 @@ export default function ComparisonCard({
   verdict,
   totalReturnPct,
   variant = "research",
+  engineLabel,
 }: Props) {
   const v = verdict || comparison?.verdict || "—";
   const research = comparison?.research_return_pct;
@@ -38,6 +40,7 @@ export default function ComparisonCard({
   return (
     <div className="card">
       <p className={`text-lg font-medium ${verdictColor(v)}`}>结论：{v}</p>
+      {engineLabel && <p className="mt-1 text-xs text-slate-500">验证引擎：{engineLabel}</p>}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg bg-slate-900/60 p-3">
           <p className="text-xs text-slate-500">{quickLabel}</p>

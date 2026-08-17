@@ -339,11 +339,16 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
 
         return run_backtest(**params)
     if job_type == "screen":
-        from qmt_quant.core.screener.dsl import load_rule
+        from qmt_quant.core.screener.dsl import load_rule, parse_rule_yaml
         from qmt_quant.core.screener.runner import run_screening
 
         rule_path = params.pop("rule_path", None)
-        dsl_rule = load_rule(rule_path) if rule_path else None
+        rule_yaml = params.pop("rule_yaml", None)
+        dsl_rule = None
+        if rule_path:
+            dsl_rule = load_rule(rule_path)
+        elif rule_yaml:
+            dsl_rule = parse_rule_yaml(str(rule_yaml))
         return run_screening(**params, rule=dsl_rule)
     if job_type == "screen_backtest":
         from qmt_quant.core.screener.bridge import run_screen_backtest

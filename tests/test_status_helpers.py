@@ -40,3 +40,9 @@ def test_actions_try_strategy_when_ready():
     )
     ids = [a["id"] for a in actions]
     assert "try_strategy" in ids
+
+
+def test_has_strategy_run_false_on_empty(db):
+    from qmt_quant.web.status_helpers import has_strategy_run
+
+    assert has_strategy_run() is False

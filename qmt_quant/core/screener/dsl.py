@@ -32,6 +32,13 @@ def load_rule(path: str | Path) -> ScreeningRule:
     return parse_rule(raw)
 
 
+def parse_rule_yaml(text: str) -> ScreeningRule:
+    raw = yaml.safe_load(text) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("YAML 规则必须是对象")
+    return parse_rule(raw)
+
+
 def parse_rule(raw: Dict[str, Any]) -> ScreeningRule:
     rule = ScreeningRule(name=raw.get("name", ""))
     rule.as_of = raw.get("as_of")
