@@ -152,6 +152,9 @@ class ValidateBody(BaseModel):
     strategy: str = "ma_cross"
     short: int = 20
     long: int = 120
+    fast: int = 12
+    slow: int = 26
+    signal: int = 9
     match: str = "next_open"
     benchmark: str = "hs300"
     screen_run_id: Optional[str] = None
@@ -738,6 +741,9 @@ def create_app() -> FastAPI:
                 "strategy_id": body.strategy,
                 "short_window": body.short,
                 "long_window": body.long,
+                "fast_window": body.fast,
+                "slow_window": body.slow,
+                "signal_window": body.signal,
                 "match_price": body.match,
                 "benchmark": body.benchmark,
                 "screen_run_id": body.screen_run_id,
@@ -924,6 +930,7 @@ def create_app() -> FastAPI:
     def options_strategies() -> List[Dict[str, str]]:
         return [
             {"id": "ma_cross", "label": "双均线"},
+            {"id": "macd_cross", "label": "MACD 金叉死叉"},
             {"id": "buy_hold", "label": "买入持有基准"},
             {"id": "pe_momentum", "label": "低估值 + 动量"},
             {"id": "screening_rebalance", "label": "选股调仓"},

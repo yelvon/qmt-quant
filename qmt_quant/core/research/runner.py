@@ -119,7 +119,7 @@ def run_research(
         transfer_fee_rate=base_cost.transfer_fee_rate,
         slippage_bps=base_cost.slippage_bps,
     )
-    portfolio = PortfolioSpec.from_settings()
+    portfolio = PortfolioSpec.for_universe(len(prices.columns))
     runner = _RESEARCH_RUNNERS.get(strategy_id)
     if runner is None:
         STRATEGIES.get(strategy_id)
@@ -352,6 +352,62 @@ def _run_ma_cross_scan(
     }
 
 
+def _run_macd_scan(
+    prices: pd.DataFrame,
+    fees: float,
+    job_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    plugin = STRATEGIES.get("macd_cross")
+    candidates = list(plugin.candidate_params({}))
+    rows: List[Dict[str, Any]] = []
+    total = len(candidates)
+    context = StrategyContext(prices=prices)
+    for idx, params in enumerate(candidates):
+        if job_id and (idx == 0 or idx % 3 == 0 or idx == total - 1):
+            report_job_progress(
+                job_id,
+                0.22 + 0.58 * (idx / max(total, 1)),
+                f"参数扫描 {idx + 1}/{total}",
+                step="scan",
+                detail=(
+                    f"MACD {params['fast_window']}/"
+                    f"{params['slow_window']}/{params['signal_window']}"
+                ),
+            )
+        signal = plugin.signal(context, params)
+        total_return = float((1 + _signal_returns(prices, signal, fees)).prod() - 1)
+        label = (
+            f"{params['fast_window']}/{params['slow_window']}/{params['signal_window']}"
+        )
+        rows.append(
+            {
+                **params,
+                "fast": params["fast_window"],
+                "slow": params["slow_window"],
+                "signal": params["signal_window"],
+                "label": label,
+                "total_return_pct": round(total_return * 100, 2),
+            }
+        )
+    rows.sort(key=lambda r: r["total_return_pct"], reverse=True)
+    best = rows[0] if rows else {"label": "12/26/9", "total_return_pct": 0}
+    best_signal = plugin.signal(
+        context,
+        {
+            "fast_window": int(best.get("fast_window", 12)),
+            "slow_window": int(best.get("slow_window", 26)),
+            "signal_window": int(best.get("signal_window", 9)),
+        },
+    )
+    return {
+        "strategy": "macd_cross",
+        "combos": rows,
+        "best": best,
+        "engine": "vectorbt",
+        "equity_curve": _equity_curve(_signal_returns(prices, best_signal, fees)),
+    }
+
+
 def _numpy_ma_scan(
     prices: pd.DataFrame,
     combos: List[Tuple[int, int]],
@@ -456,6 +512,10 @@ def _ma_runner(prices: pd.DataFrame, fees: float, options: Dict[str, Any]) -> Di
     )
 
 
+def _macd_runner(prices: pd.DataFrame, fees: float, options: Dict[str, Any]) -> Dict[str, Any]:
+    return _run_macd_scan(prices, fees, job_id=options.get("job_id"))
+
+
 def _buy_hold_runner(
     prices: pd.DataFrame, fees: float, options: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -499,6 +559,7 @@ def _screening_runner(
 
 _RESEARCH_RUNNERS = {
     "ma_cross": _ma_runner,
+    "macd_cross": _macd_runner,
     "buy_hold": _buy_hold_runner,
     "pe_momentum": _pe_runner,
     "screening_rebalance": _screening_runner,
@@ -508,9 +569,22 @@ _RESEARCH_RUNNERS = {
 def _candidate_params(strategy_id: str, row: Dict[str, Any]) -> Dict[str, Any]:
     if strategy_id == "ma_cross":
         return {
-            "short_window": int(row.get("short", 20)),
-            "long_window": int(row.get("long", 120)),
+            "short_window": int(row.get("short", row.get("short_window", 20))),
+            "long_window": int(row.get("long", row.get("long_window", 120))),
         }
+    if strategy_id == "macd_cross":
+        return {
+            "fast_window": int(row.get("fast", row.get("fast_window", 12))),
+            "slow_window": int(row.get("slow", row.get("slow_window", 26))),
+            "signal_window": int(row.get("signal", row.get("signal_window", 9))),
+        }
+    if strategy_id == "pe_momentum":
+        return {
+            "pe_threshold": float(row.get("pe_threshold", 30)),
+            "momentum_window": int(row.get("momentum_window", 20)),
+        }
+    if strategy_id == "screening_rebalance":
+        return {"rebalance_days": int(row.get("rebalance_days", 20))}
     return {}
 
 
@@ -563,3 +637,5 @@ def _rerank_with_a_share_kernel(
     result["ranking_engine"] = "a_share_daily"
     if best_result is not None:
         result["equity_curve"] = best_result.equity_curve
+        result["skipped_signals"] = best_result.skipped_signals
+        result["position_size_pct"] = portfolio.position_size_pct

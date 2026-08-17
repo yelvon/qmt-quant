@@ -157,6 +157,7 @@ python -m qmt_quant.cli serve api
 | strategy_id | 研究 | Custom 验证 | Nautilus 实验 | 说明 |
 |-------------|------|-------------|---------------|------|
 | `ma_cross` | ✓ | ✓ | MVP | 双均线参数扫描 |
+| `macd_cross` | ✓ | ✓ | — | MACD 金叉持有、死叉空仓；扫描快/慢/信号线 |
 | `buy_hold` | ✓ | ✓ | — | 基准（策略 ID 不是 `buy_and_hold`） |
 | `pe_momentum` | ✓ | ✓ | — | 财报按 `announce_date` 对齐 |
 | `screening_rebalance` | ✓ | ✓ | — | 历史回测必须用 rolling 点时快照 |
@@ -216,6 +217,7 @@ pytest -m performance
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-18 | 新增 `macd_cross`：DIF 上穿 DEA 金叉持有、下穿死叉空仓；研究扫描与 custom 验证共用插件 |
 | 2026-08-18 | 统一策略插件与 A 股内核、实验产物/比较 API、rolling 选股快照与性能基线；Nautilus 明确为无 fallback 的实验引擎 |
 | 2026-08-17 | 原生周线：日线按实际交易周聚合，周末收盘确认并在下一交易日开盘执行，研究/验证/Walk-Forward/Web 全链路支持 |
 | 2026-08-17 | 可信基线与偏差修复：真实策略净值、点时股票池、禁止静态历史选股、停牌禁成交 |

@@ -74,6 +74,7 @@ def compute_per_stock_returns(
 
         try:
             sub_params = dict(params)
+            sub_params.pop("portfolio", None)
             signal_prices = sub_params.get("signal_prices")
             if isinstance(signal_prices, pd.DataFrame) and code in signal_prices.columns:
                 sub_params["signal_prices"] = signal_prices[[code]]

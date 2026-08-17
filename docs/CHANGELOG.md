@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- 统一 `core/backtest` 基础层：共享 `StrategyRegistry` / `StrategyPlugin`、成本与组合配置、确定性计算 kernel；research、Walk-Forward 与 custom validation 按同一策略 ID 解析
+- 内置 `macd_cross` 策略：DIF 上穿 DEA（金叉）持有、下穿（死叉）空仓；研究层扫描快/慢/信号线参数，custom 验证与 Walk-Forward 共用同一插件
 - 实验中心：每次研究/验证保存 strategy identity、数据指纹、manifest、完整指标/诊断及隔离的 `reports/<run_id>/` 产物；新增实验列表、详情、双 run 比较 API 与 Web 页面
 - 选股 rolling 点时快照与审计：`SelectionSnapshotProvider` 在每个调仓日仅使用当时可见数据；rolling IC 支持多窗口/多 horizon
 - 代表性性能基线（300 标的、10 年、参数网格、周线、rolling IC），以 `performance` marker 显式运行
@@ -79,6 +79,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- 单股回测默认用全部资金下单：此前组合 10% 仓位对茅台等高价股凑不够 1 手，MACD/均线会出现扫描有收益、A 股内核成交与收益全为 0；买不起 1 手时写入 `insufficient_cash_for_lot`
 - 研究报告净值严格来自策略收益，不再缺失时回退为全股票等权净值
 - 禁止单次 `screening_rebalance` 选股结果静态贯穿历史；停牌（`volume=0`）信号禁止成交并记录原因
 - 选股结果代码可跳转 K 线；数据浏览支持 `?tab=&code=`

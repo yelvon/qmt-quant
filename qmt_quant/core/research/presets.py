@@ -27,6 +27,7 @@ LONG_MA_PRESETS = {k: {"label": k, "values": v} for k, v in MA_LONG_PRESETS.item
 
 STRATEGY_OPTIONS = [
     {"value": "ma_cross", "label": "双均线交叉（入门）"},
+    {"value": "macd_cross", "label": "MACD 金叉死叉"},
     {"value": "buy_hold", "label": "买入持有（基准）"},
     {"value": "pe_momentum", "label": "低估值 + 动量"},
 ]

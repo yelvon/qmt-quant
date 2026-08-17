@@ -10,6 +10,7 @@ import {
   researchCallout,
   simpleBacktestCallout,
   singleBacktestCallout,
+  skippedSignalsNote,
   strategyAllowedInPoolMode,
   strategyAllowedInSingleMode,
   usesMaPresets,
@@ -859,12 +860,13 @@ export default function ResearchPage() {
                 equity={effectiveValidateDetail.equity_curve}
               />
             )}
-            {isSingle && Array.isArray(effectiveValidateDetail.skipped_signals) && effectiveValidateDetail.skipped_signals.length > 0 && (
-              <p className="mt-2 text-xs text-amber-300/90">
-                已跳过 {effectiveValidateDetail.skipped_signals.length} 条无行情/无效信号：
-                {effectiveValidateDetail.skipped_signals.map((s: { date?: string }) => s.date).filter(Boolean).join("、")}
-              </p>
-            )}
+            {(() => {
+              const note = skippedSignalsNote(
+                effectiveValidateDetail.skipped_signals,
+                effectiveValidateDetail.trade_count,
+              );
+              return note ? <p className="mt-2 text-xs text-amber-300/90">{note}</p> : null;
+            })()}
             {effectiveValidateDetail.research_best && (
               <p className="mt-2 text-xs text-slate-500">
                 后台选用参数：{effectiveValidateDetail.research_best.label}（快速扫描收益{" "}

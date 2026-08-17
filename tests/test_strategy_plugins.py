@@ -18,7 +18,7 @@ def _prices() -> pd.DataFrame:
 
 
 def test_builtin_strategies_are_registered():
-    assert {"ma_cross", "buy_hold", "pe_momentum", "screening_rebalance"} <= set(
+    assert {"ma_cross", "macd_cross", "buy_hold", "pe_momentum", "screening_rebalance"} <= set(
         STRATEGIES.ids()
     )
 

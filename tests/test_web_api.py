@@ -29,6 +29,7 @@ def test_options(client):
     res = client.get("/api/options/strategies")
     assert res.status_code == 200
     assert any(o["id"] == "ma_cross" for o in res.json())
+    assert any(o["id"] == "macd_cross" for o in res.json())
 
 
 def test_data_meta(client):

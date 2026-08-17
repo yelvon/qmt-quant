@@ -217,7 +217,7 @@ class AShareDailyBacktester:
             held = 1.0 if side == "buy" else 0.0
             signal.loc[ts:, code] = held
         result = self._run_signal_loop(signal, include_first_bar=True)
-        result.skipped_signals = skipped
+        result.skipped_signals = skipped + list(result.skipped_signals or [])
         return result
 
     def _run_signal_loop(
@@ -250,6 +250,8 @@ class AShareDailyBacktester:
                     )
                     if qty >= self.venue.lot_size:
                         self._buy(exec_date, code, exec_price, qty)
+                    else:
+                        self._skip(exec_date, code, "insufficient_cash_for_lot")
                 elif not hold_only and prev_sig > 0 and curr_sig <= 0 and pos > 0:
                     if self._is_suspended(code, exec_idx):
                         self._skip(exec_date, code, "suspended_volume_zero")
@@ -393,6 +395,7 @@ class AShareDailyBacktester:
             lot_size=self.venue.lot_size,
         )
         if fill is None:
+            self._skip(dt, code, "insufficient_cash_for_lot")
             return
         self.cash += fill.cash_delta
         self.positions[code] = self.positions.get(code, 0) + fill.quantity

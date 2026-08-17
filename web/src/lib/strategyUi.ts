@@ -2,6 +2,7 @@
 
 export const STRATEGY_HINTS: Record<string, string> = {
   ma_cross: "扫描多组短/长均线组合；柱状图越高表示该参数组合历史收益越好。",
+  macd_cross: "扫描 MACD 快/慢/信号线参数；DIF 上穿 DEA（金叉）持有，下穿（死叉）空仓。",
   buy_hold: "等权买入持有基准，用于对比策略是否跑赢简单持有。",
   pe_momentum: "低 PE + 正动量因子策略；需要先在「② 准备数据」同步财报。",
   screening_rebalance: "对选股池等权再平衡；请从「⑤ 选股」送入股票池后再扫描。",
@@ -29,7 +30,7 @@ export function simpleBacktestCallout(strategy: string): string {
 
 export function singleBacktestCallout(strategy: string): string {
   if (strategy === "screening_rebalance") {
-    return "单股回测不支持「选股再平衡」策略，请换双均线、买入持有或低估值动量。";
+    return "单股回测不支持「选股再平衡」策略，请换双均线、MACD、买入持有或低估值动量。";
   }
   if (strategy === "pe_momentum") {
     return "单股回测：选定一只股票，检验策略在该股上的历史表现。需先在 ② 同步该股日线与财报。";
@@ -56,6 +57,24 @@ export function formatPastRunLabel(run: PastRunOption): string {
   const date = raw.includes("T") ? raw.slice(0, 16).replace("T", " ") : raw.slice(0, 10);
   if (date) return `${date} · ${run.label}`;
   return run.label;
+}
+
+export function skippedSignalsNote(
+  skipped: Array<{ date?: string; code?: string; reason?: string }> | undefined,
+  tradeCount?: number,
+): string | null {
+  const rows = Array.isArray(skipped) ? skipped : [];
+  const lotFails = rows.filter((row) => row.reason === "insufficient_cash_for_lot").length;
+  if (lotFails > 0) {
+    return `有 ${lotFails} 次买入信号因现金不够买 1 手被跳过（高价股在组合默认 10% 仓位下常见）。单股回测会用全部资金下单。`;
+  }
+  if ((tradeCount ?? 0) === 0 && rows.length === 0) {
+    return "区间内没有成交：可能没有金叉/死叉，或信号被停牌、涨跌停挡住。";
+  }
+  if (rows.length === 0) return null;
+  const dates = rows.map((row) => row.date).filter(Boolean).slice(0, 8).join("、");
+  const extra = rows.length > 8 ? ` 等 ${rows.length} 条` : "";
+  return `已跳过 ${rows.length} 条信号（无行情/无效/停牌等）：${dates}${extra}`;
 }
 
 export function payloadErrorMessage(payload: Record<string, unknown>): string | null {

@@ -35,6 +35,9 @@ def run_validation(
     strategy_id: str = "ma_cross",
     short_window: int = 20,
     long_window: int = 120,
+    fast_window: int = 12,
+    slow_window: int = 26,
+    signal_window: int = 9,
     match_price: str = "next_open",
     benchmark: str = "hs300",
     range_preset: str = "3y",
@@ -63,13 +66,25 @@ def run_validation(
             research_metrics = research_row.get("metrics")
             params = research_row.get("params", {})
             best = research_metrics or {}
+            strategy_id = research_row.get("strategy_id", strategy_id)
             label = best.get("label", "20/120")
             if strategy_id == "ma_cross" and "/" in str(label):
                 parts = str(label).split("/")
-                short_window = int(parts[0])
-                long_window = int(parts[1])
+                if len(parts) >= 2:
+                    short_window = int(parts[0])
+                    long_window = int(parts[1])
+            if strategy_id == "macd_cross":
+                fast_window = int(best.get("fast_window", params.get("fast_window", fast_window)))
+                slow_window = int(best.get("slow_window", params.get("slow_window", slow_window)))
+                signal_window = int(
+                    best.get("signal_window", params.get("signal_window", signal_window))
+                )
+                parts = str(label).split("/")
+                if len(parts) == 3:
+                    fast_window = int(parts[0])
+                    slow_window = int(parts[1])
+                    signal_window = int(parts[2])
             range_preset = params.get("range_preset", range_preset)
-            strategy_id = research_row.get("strategy_id", strategy_id)
             screen_run_id = params.get("screen_run_id", screen_run_id)
             fee_preset = params.get("fee_preset", fee_preset)
             inherited_frequency = params.get("bar_frequency")
@@ -151,11 +166,18 @@ def run_validation(
             0.45,
             "按 A 股规则回测…",
             step="backtest",
-            detail=f"{len(prices.columns)} 只股票 · 均线 {short_window}/{long_window} · 成交 {match_price}",
+            detail=(
+                f"{len(prices.columns)} 只股票 · "
+                f"{'MACD ' + str(fast_window) + '/' + str(slow_window) + '/' + str(signal_window) if strategy_id == 'macd_cross' else '均线 ' + str(short_window) + '/' + str(long_window)}"
+                f" · 成交 {match_price}"
+            ),
         )
     params: Dict[str, Any] = {
         "short_window": short_window,
         "long_window": long_window,
+        "fast_window": fast_window,
+        "slow_window": slow_window,
+        "signal_window": signal_window,
         "screen_run_id": screen_run_id,
         "codes": universe or list(prices.columns),
         "signals": signals or [],
@@ -174,7 +196,9 @@ def run_validation(
         transfer_fee_rate=base_cost.transfer_fee_rate,
         slippage_bps=base_cost.slippage_bps,
     )
-    params["portfolio"] = PortfolioSpec.from_settings(match_price=match_price)
+    params["portfolio"] = PortfolioSpec.for_universe(
+        len(prices.columns), match_price=match_price
+    )
     result = validator.run(strategy_id, prices, ohlcv=ohlcv, **params)
 
     engine_label = validation_engine_label(engine_name)
@@ -204,12 +228,16 @@ def run_validation(
         "strategy_id": strategy_id,
         "short_window": short_window,
         "long_window": long_window,
+        "fast_window": fast_window,
+        "slow_window": slow_window,
+        "signal_window": signal_window,
         "match_price": match_price,
         "benchmark": benchmark,
         "benchmark_curve": benchmark_curve,
         "total_return_pct": result.total_return_pct,
         "max_drawdown_pct": result.max_drawdown_pct,
         "trade_count": result.trade_count,
+        "position_size_pct": params["portfolio"].position_size_pct,
         "verdict": comparison.get("verdict", result.verdict),
         "comparison": comparison,
         "equity_curve": result.equity_curve,
@@ -275,10 +303,15 @@ def run_validation(
             conn,
             engine=engine_label,
             strategy_id=strategy_id,
-            title=f"validate {strategy_id} {short_window}/{long_window}",
+            title=f"validate {strategy_id} {fast_window}/{slow_window}/{signal_window}"
+            if strategy_id == "macd_cross"
+            else f"validate {strategy_id} {short_window}/{long_window}",
             params={
                 "short_window": short_window,
                 "long_window": long_window,
+                "fast_window": fast_window,
+                "slow_window": slow_window,
+                "signal_window": signal_window,
                 "match_price": match_price,
                 "from_run_id": from_run_id,
                 "screen_run_id": screen_run_id,

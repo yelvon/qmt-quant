@@ -97,6 +97,7 @@
 |----|----------|------------|--------|
 | buy_hold | Yes | Yes | Done |
 | ma_cross | Yes | Yes | Done |
+| macd_cross | Yes | Yes | Done |
 | pe_momentum | Yes | Yes | Done |
 | screening_rebalance | Yes | Yes | Done |
 

@@ -58,6 +58,13 @@ class PortfolioSpec:
         values.update({key: value for key, value in overrides.items() if value is not None})
         return cls(**values)
 
+    @classmethod
+    def for_universe(cls, n_codes: int, **overrides: Any) -> "PortfolioSpec":
+        """Single-name accounts use 100% cash; multi-name slices stay at 10%."""
+        if overrides.get("position_size_pct") is None:
+            overrides["position_size_pct"] = 1.0 if int(n_codes) <= 1 else 0.1
+        return cls.from_settings(**overrides)
+
 
 @dataclass
 class StrategyContext:
@@ -144,6 +151,35 @@ def _ma_signal(context: StrategyContext, params: Dict[str, Any]) -> pd.DataFrame
     return (context.prices.rolling(short).mean() > context.prices.rolling(long).mean()).astype(float)
 
 
+def macd_lines(
+    prices: pd.DataFrame,
+    *,
+    fast_window: int = 12,
+    slow_window: int = 26,
+    signal_window: int = 9,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return DIF and DEA (signal) lines using EMA spans."""
+    fast = max(1, int(fast_window))
+    slow = max(fast + 1, int(slow_window))
+    signal = max(1, int(signal_window))
+    ema_fast = prices.ewm(span=fast, adjust=False).mean()
+    ema_slow = prices.ewm(span=slow, adjust=False).mean()
+    dif = ema_fast - ema_slow
+    dea = dif.ewm(span=signal, adjust=False).mean()
+    return dif, dea
+
+
+def _macd_signal(context: StrategyContext, params: Dict[str, Any]) -> pd.DataFrame:
+    """Hold while DIF > DEA (golden-cross on, death-cross off)."""
+    dif, dea = macd_lines(
+        context.prices,
+        fast_window=int(params.get("fast_window", 12)),
+        slow_window=int(params.get("slow_window", 26)),
+        signal_window=int(params.get("signal_window", 9)),
+    )
+    return (dif > dea).astype(float)
+
+
 def _buy_hold_signal(context: StrategyContext, params: Dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(1.0, index=context.prices.index, columns=context.prices.columns)
 
@@ -200,6 +236,23 @@ def _ma_candidates(params: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
     )
 
 
+def _macd_candidates(params: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+    fasts = params.get("fast_windows") or [8, 12, 16]
+    slows = params.get("slow_windows") or [21, 26, 30]
+    signals = params.get("signal_windows") or [7, 9]
+    return (
+        {
+            "fast_window": int(fast),
+            "slow_window": int(slow),
+            "signal_window": int(signal),
+        }
+        for fast in fasts
+        for slow in slows
+        for signal in signals
+        if int(fast) < int(slow)
+    )
+
+
 def _pe_momentum_candidates(params: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
     thresholds = params.get("pe_thresholds") or [15, 20, 30, 40]
     windows = params.get("momentum_windows") or [10, 20, 60]
@@ -216,6 +269,7 @@ def _screening_candidates(params: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
 
 
 register_strategy(SignalStrategyPlugin("ma_cross", _ma_signal, _ma_candidates))
+register_strategy(SignalStrategyPlugin("macd_cross", _macd_signal, _macd_candidates))
 register_strategy(
     SignalStrategyPlugin("buy_hold", _buy_hold_signal, hold_only=True, include_first_bar=True)
 )

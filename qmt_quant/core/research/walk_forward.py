@@ -128,6 +128,10 @@ def run_walk_forward(
         if strategy_id == "ma_cross":
             segments[-1]["short"] = int(best_params["short_window"])
             segments[-1]["long"] = int(best_params["long_window"])
+        if strategy_id == "macd_cross":
+            segments[-1]["fast"] = int(best_params["fast_window"])
+            segments[-1]["slow"] = int(best_params["slow_window"])
+            segments[-1]["signal"] = int(best_params["signal_window"])
         origin += step
         seg_no += 1
 
@@ -183,7 +187,7 @@ def _kernel_run(
             transfer_fee_rate=base.transfer_fee_rate,
             slippage_bps=base.slippage_bps,
         ),
-        portfolio=PortfolioSpec.from_settings(),
+        portfolio=PortfolioSpec.for_universe(len(execution_prices.columns)),
     )
     result = engine.run_strategy(strategy_id, params, metadata=metadata)
     return {

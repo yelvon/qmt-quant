@@ -4,7 +4,7 @@ import { apiGet, apiPost } from "../lib/api";
 import { useBacktestMode } from "../lib/backtestMode";
 import { parseApiError } from "../lib/errorMessages";
 import { isValidationJob } from "../lib/jobTypes";
-import { formatPastRunLabel, payloadErrorMessage, type PastRunOption } from "../lib/strategyUi";
+import { formatPastRunLabel, payloadErrorMessage, skippedSignalsNote, type PastRunOption } from "../lib/strategyUi";
 import { useJobResultLoader } from "../lib/useJobResultLoader";
 import { useJobTracker } from "../lib/useJobTracker";
 import BacktestModeSwitch from "../components/BacktestModeSwitch";
@@ -341,6 +341,10 @@ export default function ValidationPage() {
                 equity={detail.equity_curve}
               />
             )}
+            {(() => {
+              const note = skippedSignalsNote(detail.skipped_signals, detail.trade_count);
+              return note ? <p className="mt-2 text-xs text-amber-300/90">{note}</p> : null;
+            })()}
             {!fromRun && (
               <p className="mt-2 text-xs text-amber-300/90">
                 未关联③的研究记录，使用的是默认参数验证。
