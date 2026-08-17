@@ -17,6 +17,7 @@ import EmptyState from "../components/EmptyState";
 import StrategyErrorCard from "../components/StrategyErrorCard";
 import TechnicalDetails from "../components/TechnicalDetails";
 import StockReturnsTable from "../components/StockReturnsTable";
+import SingleStockTradeView from "../components/SingleStockTradeView";
 
 type RunOption = PastRunOption;
 
@@ -306,6 +307,14 @@ export default function ValidationPage() {
                 title="验证净值 vs 沪深300"
                 equity={detail.equity_curve}
                 benchmark={detail.benchmark_curve}
+              />
+            )}
+            {Array.isArray(detail.codes) && detail.codes.length === 1 && (
+              <SingleStockTradeView
+                code={detail.codes[0]}
+                trades={detail.trades || []}
+                tradesTruncated={Boolean(detail.trades_truncated)}
+                equity={detail.equity_curve}
               />
             )}
             {!fromRun && (

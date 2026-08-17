@@ -14,7 +14,7 @@ from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import FEE_PRESETS
 from qmt_quant.core.research.runner import _run_ma_cross_scan
-from qmt_quant.core.sync.universe import resolve_universe
+from qmt_quant.core.research.universe import resolve_research_universe_meta
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import save_backtest_run
 
@@ -112,6 +112,8 @@ def run_walk_forward_study(
     test_bars: int = 63,
     step_bars: int | None = None,
     codes: Optional[List[str]] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
     job_id: Optional[str] = None,
 ) -> dict:
     """Load prices and run walk-forward analysis, persisting results."""
@@ -126,10 +128,15 @@ def run_walk_forward_study(
             step="load",
             detail=f"{start} ~ {end} · train {train_bars} / test {test_bars} 根 K 线",
         )
-    if codes:
-        universe = codes
-    else:
-        universe = resolve_universe(sector)[:50]
+    universe, uni_meta = resolve_research_universe_meta(
+        sector=sector,
+        strategy_id=strategy_id,
+        codes=codes,
+        sample=sample,
+        universe_n=universe_n,
+        range_end=end,
+        adjust_type=settings.bar_adjust_type,
+    )
     prices = load_price_matrix(
         adjust_type=settings.bar_adjust_type,
         start_date=start,
@@ -151,12 +158,15 @@ def run_walk_forward_study(
         fees=fees,
         job_id=job_id,
     )
+    used_codes = list(prices.columns)
     result["params"] = {
         "sector": sector,
         "range_preset": range_preset,
         "train_bars": train_bars,
         "test_bars": test_bars,
-        "codes": codes,
+        "codes": used_codes,
+        "sample": uni_meta.get("sample") or sample,
+        "universe_n": uni_meta.get("universe_n"),
     }
 
     reports_dir = ROOT_DIR / "reports"

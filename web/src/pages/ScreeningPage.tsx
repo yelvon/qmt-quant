@@ -111,6 +111,16 @@ export default function ScreeningPage() {
     nav("/research");
   }
 
+  async function sendToBacktest() {
+    if (!runId) return;
+    const res = await apiPost<{ job_id: string }>("/api/jobs/backtest", {
+      strategy: "screening_rebalance",
+      screen_run_id: runId,
+    });
+    job.trackJob(res.job_id, "选股池策略回测中…", "backtest");
+    nav("/research");
+  }
+
   async function sendToValidation() {
     if (!runId) return;
     if (isSimple || isSingle) {
@@ -240,13 +250,21 @@ export default function ScreeningPage() {
         <EmptyState title="还没有选股结果" description="选择模板与条件后点击「开始选股」。" />
       )}
       {runId && (
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 space-y-2">
+          <p className="text-xs text-slate-400">
+            送到回测将使用「选股调仓」策略：对已落库股票池等权持有，并按再平衡周期调仓。
+          </p>
+          <div className="flex flex-wrap gap-2">
           <button className="btn-secondary" disabled={job.isRunning} onClick={sendToResearch}>
             送到快速试策略
+          </button>
+          <button className="btn-secondary" disabled={job.isRunning} onClick={sendToBacktest}>
+            送到策略回测
           </button>
           <button className="btn-secondary" disabled={job.isRunning} onClick={sendToValidation}>
             {isSimple || isSingle ? "送到仔细验策略（将切到研究模式）" : "送到仔细验策略"}
           </button>
+          </div>
         </div>
       )}
       {results.length > 0 && (

@@ -1,6 +1,6 @@
 # qmt-quant Implementation Progress
 
-> Last updated: 2026-08-12  
+> Last updated: 2026-08-17  
 > PRD version: v0.3
 
 ## Phase Milestones
@@ -46,7 +46,7 @@
 | ID | Requirement | Status |
 |----|-------------|--------|
 | BT-V-001 | Single-symbol signals | Done |
-| BT-V-002 | Multi-symbol cross-section | Partial (50-stock cap in research) |
+| BT-V-002 | Multi-symbol cross-section | Partial（默认代码序 50，可选成交额抽样） |
 | BT-V-003 | Parameter grid search | Done |
 | BT-V-004 | cash_sharing portfolio | Done |
 | BT-V-005 | A-share fees | Done |
@@ -113,7 +113,9 @@
 |------|--------|
 | 导航 ①–⑥ 编号固定（不随模式改） | Done |
 | 总览 pipeline 用 job.step；引导第三步可完成 | Done |
-| 研究宇宙 50 只截断提示 | Done |
+| 研究宇宙 50 只截断提示 | Done（可选成交额抽样） |
+| 单股成交明细 + K 线 B/S | Done |
+| 信号回放 signal_replay | Done |
 | 验证引擎可见 / 可选 | Done |
 | 选股 YAML 可编辑 + K 线/IC 闭环 | Done |
 | 任务横幅多 running + Jobs 轮询 | Done |

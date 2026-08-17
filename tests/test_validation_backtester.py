@@ -3,7 +3,8 @@
 import pandas as pd
 import pytest
 
-from qmt_quant.core.validation.backtester import AShareDailyBacktester
+from qmt_quant.core.validation.backtester import AShareDailyBacktester, Trade
+from qmt_quant.core.validation.trades import MULTI_SYMBOL_TRADE_CAP, serialize_trades
 
 
 def _sample_prices():
@@ -58,3 +59,17 @@ def test_round_lots():
 
     assert round_lots(250, 100) == 200
     assert round_lots(50, 100) == 0
+
+
+def test_serialize_trades_keeps_all_for_single_symbol():
+    trades = [Trade("2024-01-02", "600519.SH", "买入", 100, 100, 1) for _ in range(25)]
+    rows, truncated = serialize_trades(trades, 1)
+    assert len(rows) == 25
+    assert truncated is False
+
+
+def test_serialize_trades_caps_multi_symbol():
+    trades = [Trade("2024-01-02", "000001.SZ", "买入", 10, 100, 1) for _ in range(MULTI_SYMBOL_TRADE_CAP + 5)]
+    rows, truncated = serialize_trades(trades, 2)
+    assert len(rows) == MULTI_SYMBOL_TRADE_CAP
+    assert truncated is True

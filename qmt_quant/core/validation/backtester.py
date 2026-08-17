@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -38,6 +38,16 @@ class ValidationResult:
     max_drawdown_pct: float = 0.0
     verdict: str = "可以采用"
     trade_count: int = 0
+    skipped_signals: List[Dict[str, str]] = field(default_factory=list)
+
+
+def parse_signal_side(raw: Any) -> Optional[str]:
+    s = str(raw or "").strip().lower()
+    if s in ("buy", "b", "买入"):
+        return "buy"
+    if s in ("sell", "s", "卖出"):
+        return "sell"
+    return None
 
 
 class AShareDailyBacktester:
@@ -127,14 +137,45 @@ class AShareDailyBacktester:
                 signal.loc[dt:, c] = 1.0
         return self._run_signal_loop(signal)
 
+    def run_signals(self, signals: list | None) -> ValidationResult:
+        """Replay explicit buy/sell dates on the first price column (single-stock)."""
+        skipped: List[Dict[str, str]] = []
+        signal = pd.DataFrame(0.0, index=self.prices.index, columns=self.prices.columns)
+        if self.prices.empty:
+            result = ValidationResult(verdict="建议复核")
+            result.skipped_signals = skipped
+            return result
+        code = self.prices.columns[0]
+        date_index = {dt.strftime("%Y-%m-%d"): dt for dt in self.dates}
+        held = 0.0
+        for item in signals or []:
+            if not isinstance(item, dict):
+                skipped.append({"date": "", "reason": "invalid_row"})
+                continue
+            date_s = str(item.get("date") or "")[:10]
+            side = parse_signal_side(item.get("side"))
+            if side is None:
+                skipped.append({"date": date_s, "reason": "invalid_side"})
+                continue
+            ts = date_index.get(date_s)
+            if ts is None:
+                skipped.append({"date": date_s, "reason": "no_bar"})
+                continue
+            held = 1.0 if side == "buy" else 0.0
+            signal.loc[ts:, code] = held
+        result = self._run_signal_loop(signal, include_first_bar=True)
+        result.skipped_signals = skipped
+        return result
+
     def _run_signal_loop(
         self,
         signal: pd.DataFrame,
         *,
         hold_only: bool = False,
+        include_first_bar: bool = False,
     ) -> ValidationResult:
         for i, dt in enumerate(self.dates):
-            if i == 0:
+            if i == 0 and not include_first_bar:
                 self._record_equity(dt)
                 continue
             exec_idx = self._exec_index(i)
@@ -143,7 +184,7 @@ class AShareDailyBacktester:
                 continue
             exec_date = self.dates[exec_idx]
             for code in self.prices.columns:
-                prev_sig = signal.iloc[i - 1][code]
+                prev_sig = 0.0 if i == 0 else signal.iloc[i - 1][code]
                 curr_sig = signal.iloc[i][code]
                 exec_price = self._exec_price(code, exec_idx)
                 if exec_price is None or exec_price <= 0:

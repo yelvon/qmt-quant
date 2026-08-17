@@ -5,6 +5,7 @@ export const STRATEGY_HINTS: Record<string, string> = {
   buy_hold: "等权买入持有基准，用于对比策略是否跑赢简单持有。",
   pe_momentum: "低 PE + 正动量因子策略；需要先在「② 准备数据」同步财报。",
   screening_rebalance: "对选股池等权再平衡；请从「⑤ 选股」送入股票池后再扫描。",
+  signal_replay: "粘贴买卖日期表，按 A 股规则（T+1、整手、涨跌停、费用）回放成交。仅单股。",
 };
 
 export function usesMaPresets(strategy: string): boolean {
@@ -33,11 +34,18 @@ export function singleBacktestCallout(strategy: string): string {
   if (strategy === "pe_momentum") {
     return "单股回测：选定一只股票，检验策略在该股上的历史表现。需先在 ② 同步该股日线与财报。";
   }
+  if (strategy === "signal_replay") {
+    return "单股回测：粘贴 CSV（date,side），side 可为 buy/sell 或 B/S。无 K 线的信号日会跳过并列出。";
+  }
   return "单股回测：搜索并选定一只股票，点「运行回测」。可查看净值曲线、相对沪深300表现及买卖成交明细。";
 }
 
 export function strategyAllowedInSingleMode(strategy: string): boolean {
   return strategy !== "screening_rebalance";
+}
+
+export function strategyAllowedInPoolMode(strategy: string): boolean {
+  return strategy !== "signal_replay";
 }
 
 export type PastRunOption = { id: string; label: string; created_at?: string };
@@ -57,6 +65,8 @@ export function payloadErrorMessage(payload: Record<string, unknown>): string | 
     if (code === "insufficient_data") return "历史数据不足，请延长同步区间或换更短回测区间。";
     if (code === "no_screen_codes") return "选股池为空或行情未覆盖，请先完成选股与数据同步。";
     if (code === "research_save_failed") return "参数扫描完成但未能保存，请重试或查看任务记录。";
+    if (code === "signal_replay_single_only") return "信号回放只支持一只股票，请切到单股模式并选定标的。";
+    if (code === "signal_replay_use_backtest") return "信号回放请用单股「运行回测」，不要走参数扫描。";
     return String(payload.message || code);
   }
   return null;

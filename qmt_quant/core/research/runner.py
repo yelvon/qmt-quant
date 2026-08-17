@@ -15,7 +15,7 @@ from qmt_quant.core.jobs.context import report_job_progress
 from qmt_quant.core.presets import resolve_range_preset
 from qmt_quant.core.research.presets import FEE_PRESETS, ma_param_combos
 from qmt_quant.core.research.report import build_quantstats_summary
-from qmt_quant.core.research.universe import resolve_research_universe
+from qmt_quant.core.research.universe import resolve_research_universe_meta
 from qmt_quant.core.screener.bridge import load_codes_by_run_id
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import save_backtest_run
@@ -37,10 +37,17 @@ def run_research(
     fee_preset: str = "default",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
     settings = get_settings()
+    if strategy_id == "signal_replay":
+        return {
+            "error": "signal_replay_use_backtest",
+            "message": "信号回放请使用单股回测，不走参数扫描。",
+        }
     if job_id:
         report_job_progress(
             job_id,
@@ -50,11 +57,15 @@ def run_research(
             detail=f"策略 {strategy_id} · 区间 {range_preset}",
         )
     start, end = resolve_range_preset(range_preset)
-    load_codes = resolve_research_universe(
+    load_codes, uni_meta = resolve_research_universe_meta(
         sector=sector,
         strategy_id=strategy_id,
         codes=codes,
         screen_run_id=screen_run_id,
+        sample=sample,
+        universe_n=universe_n,
+        range_end=end,
+        adjust_type=settings.bar_adjust_type,
     )
 
     prices = load_price_matrix(
@@ -125,6 +136,8 @@ def run_research(
                 "fee_preset": fee_preset,
                 "screen_run_id": screen_run_id,
                 "codes": used_codes,
+                "sample": uni_meta.get("sample") or sample,
+                "universe_n": uni_meta.get("universe_n"),
             },
             metrics=result["best"],
             result_path=str(result_path),
@@ -132,6 +145,9 @@ def run_research(
     result["run_id"] = run_id
     result["result_path"] = str(result_path)
     result["universe_used"] = len(used_codes)
+    if uni_meta.get("sample_fallback"):
+        result["sample_fallback"] = uni_meta["sample_fallback"]
+    result["sample"] = uni_meta.get("sample") or sample
     return result
 
 

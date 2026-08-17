@@ -8,8 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- 单股验证写入全部成交并在日 K 标注 B/S；多标的成交列表截断并带 `trades_truncated`
+- 研究股票池可选 `sample=head|turnover` 与 `universe_n`（默认仍代码序前 50）
+- 单股策略 `signal_replay`：信号表走 A 股规则引擎；无 K 线日期写入 `skipped_signals`
 - `/api/status.has_strategy_run`：引导第三步「试策略」按是否已有回测/验证记录勾选
-- `GET /api/options/research-universe`：提交前展示股票池规模 vs 实际回测只数（上限仍 50）
+- `GET /api/options/research-universe`：提交前展示股票池规模 vs 实际回测只数；支持 `sample` / `universe_n`（默认仍代码序 50）
 - `GET /api/options/validation-engines`；验证页可选引擎；设置页可保存 `validation_engine`（默认仍 custom）
 - 选股表单透传均线窗口 / 上市天数；YAML 可编辑；`rule_yaml` 非法返回 400
 - 实盘预览走风控；`TradeBody.orders[]`；页面展示持仓/资金，支持买卖与手数

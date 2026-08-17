@@ -60,6 +60,12 @@ def _body_codes(code: Optional[str]) -> Optional[List[str]]:
     return [normalize_code(str(code).strip())]
 
 
+def _body_signals(items: Optional[List[SignalItem]]) -> Optional[List[Dict[str, str]]]:
+    if not items:
+        return None
+    return [{"date": str(s.date)[:10], "side": s.side} for s in items]
+
+
 class SyncBarsBody(BaseModel):
     sector: str = "沪深A股"
     incremental: bool = True
@@ -77,6 +83,13 @@ class WalkForwardBody(BaseModel):
     train_months: int = 12
     test_months: int = 3
     code: Optional[str] = None
+    sample: str = "head"
+    universe_n: int = 50
+
+
+class SignalItem(BaseModel):
+    date: str
+    side: str
 
 
 class ScreenIcBody(BaseModel):
@@ -117,6 +130,9 @@ class ResearchBody(BaseModel):
     fee_preset: str = "default"
     screen_run_id: Optional[str] = None
     code: Optional[str] = None
+    sample: str = "head"
+    universe_n: int = 50
+    signals: Optional[List[SignalItem]] = None
 
 
 class ValidateBody(BaseModel):
@@ -129,6 +145,7 @@ class ValidateBody(BaseModel):
     screen_run_id: Optional[str] = None
     code: Optional[str] = None
     engine: Optional[str] = None
+    signals: Optional[List[SignalItem]] = None
 
 
 class BacktestBody(BaseModel):
@@ -142,6 +159,9 @@ class BacktestBody(BaseModel):
     benchmark: str = "hs300"
     screen_run_id: Optional[str] = None
     code: Optional[str] = None
+    sample: str = "head"
+    universe_n: int = 50
+    signals: Optional[List[SignalItem]] = None
 
 
 class ScreenBody(BaseModel):
@@ -575,6 +595,8 @@ def create_app() -> FastAPI:
                 "fee_preset": body.fee_preset,
                 "screen_run_id": body.screen_run_id,
                 "codes": codes,
+                "sample": body.sample or "head",
+                "universe_n": body.universe_n,
             },
         )
         return {"job_id": job_id}
@@ -595,6 +617,8 @@ def create_app() -> FastAPI:
                 "train_bars": body.train_months * 21,
                 "test_bars": body.test_months * 21,
                 "codes": codes,
+                "sample": body.sample or "head",
+                "universe_n": body.universe_n,
             },
         )
         return {"job_id": job_id}
@@ -634,6 +658,9 @@ def create_app() -> FastAPI:
                 "benchmark": body.benchmark,
                 "screen_run_id": body.screen_run_id,
                 "codes": codes,
+                "sample": body.sample or "head",
+                "universe_n": body.universe_n,
+                "signals": _body_signals(body.signals),
             },
         )
         return {"job_id": job_id}
@@ -655,6 +682,7 @@ def create_app() -> FastAPI:
                 "screen_run_id": body.screen_run_id,
                 "codes": codes,
                 "engine": body.engine,
+                "signals": _body_signals(body.signals),
             },
         )
         return {"job_id": job_id}
@@ -831,14 +859,25 @@ def create_app() -> FastAPI:
             {"id": "buy_hold", "label": "买入持有基准"},
             {"id": "pe_momentum", "label": "低估值 + 动量"},
             {"id": "screening_rebalance", "label": "选股调仓"},
+            {"id": "signal_replay", "label": "信号回放（单股）"},
         ]
 
     @app.get("/api/options/research-universe")
     def options_research_universe(
         sector: str = "沪深A股",
         strategy: str = "ma_cross",
+        sample: str = "head",
+        universe_n: int = 50,
+        range_preset: str = "3y",
     ) -> Dict[str, Any]:
-        return describe_research_universe(sector=sector, strategy_id=strategy)
+        _start, end = resolve_range_preset(range_preset)
+        return describe_research_universe(
+            sector=sector,
+            strategy_id=strategy,
+            sample=sample,
+            universe_n=universe_n,
+            range_end=end,
+        )
 
     @app.get("/api/options/validation-engines")
     def options_validation_engines() -> Dict[str, Any]:

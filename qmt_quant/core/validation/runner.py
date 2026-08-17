@@ -15,6 +15,7 @@ from qmt_quant.core.research.universe import universe_from_research_run
 from qmt_quant.core.validation.compare import compare_with_research
 from qmt_quant.core.validation.engine import get_validation_engine, validation_engine_display_name, validation_engine_label
 from qmt_quant.core.validation.per_stock import compute_per_stock_returns
+from qmt_quant.core.validation.trades import serialize_trades
 from qmt_quant.storage.database import db_session, run_migrations
 from qmt_quant.storage.jobs import get_backtest_run, save_backtest_run
 
@@ -31,6 +32,9 @@ def run_validation(
     screen_run_id: Optional[str] = None,
     codes: Optional[list[str]] = None,
     engine: Optional[str] = None,
+    signals: Optional[list] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_migrations()
@@ -85,6 +89,16 @@ def run_validation(
         codes=universe or list(prices.columns),
     )
     engine_name = engine or settings.validation_engine
+    if strategy_id == "signal_replay":
+        engine_name = "custom"
+        if not universe or len(universe) != 1:
+            n_cols = 0 if prices.empty else len(prices.columns)
+            if n_cols != 1:
+                return {
+                    "error": "signal_replay_single_only",
+                    "message": "信号回放仅支持单股回测，请指定一只股票。",
+                }
+            universe = list(prices.columns)
     validator = get_validation_engine(engine_name, match_price=match_price, slippage_bps=settings.slippage_bps)
     if job_id:
         report_job_progress(
@@ -99,6 +113,7 @@ def run_validation(
         "long_window": long_window,
         "screen_run_id": screen_run_id,
         "codes": universe or list(prices.columns),
+        "signals": signals or [],
     }
     result = validator.run(strategy_id, prices, ohlcv=ohlcv, **params)
 
@@ -111,6 +126,7 @@ def run_validation(
     quantstats = build_quantstats_summary(equity_series)
 
     resolved_codes = universe or list(prices.columns)
+    trade_rows, trades_truncated = serialize_trades(result.trades, len(resolved_codes) or len(prices.columns))
     stock_returns: List[Dict[str, Any]] = []
     if len(resolved_codes) > 1:
         stock_returns = compute_per_stock_returns(
@@ -137,7 +153,8 @@ def run_validation(
         "verdict": comparison.get("verdict", result.verdict),
         "comparison": comparison,
         "equity_curve": result.equity_curve,
-        "trades": [t.__dict__ for t in result.trades[:20]],
+        "trades": trade_rows,
+        "trades_truncated": trades_truncated,
         "quantstats": quantstats,
         "engine": engine_label,
         "engine_label": validation_engine_display_name(engine_name),
@@ -145,6 +162,9 @@ def run_validation(
     }
     if stock_returns:
         payload["stock_returns"] = stock_returns
+    skipped = getattr(result, "skipped_signals", None) or []
+    if skipped:
+        payload["skipped_signals"] = skipped
 
     reports_dir = ROOT_DIR / "reports"
     reports_dir.mkdir(exist_ok=True)

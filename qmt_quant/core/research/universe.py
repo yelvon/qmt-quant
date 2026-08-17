@@ -2,12 +2,161 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from qmt_quant.config import get_settings
 from qmt_quant.core.screener.bridge import load_codes_by_run_id
 from qmt_quant.core.sync.universe import resolve_universe
 
 RESEARCH_UNIVERSE_CAP = 50
+TURNOVER_LOOKBACK_BARS = 20
+WATCHLIST_SECTORS = ("watchlist", "我的自选池")
+
+
+def _normalize_sample(sample: Optional[str]) -> str:
+    value = str(sample or "head").strip().lower()
+    return "turnover" if value == "turnover" else "head"
+
+
+def _cap_n(universe_n: Optional[int]) -> int:
+    try:
+        n = int(universe_n) if universe_n is not None else RESEARCH_UNIVERSE_CAP
+    except (TypeError, ValueError):
+        n = RESEARCH_UNIVERSE_CAP
+    return n if n > 0 else RESEARCH_UNIVERSE_CAP
+
+
+def _explicit_pool(
+    *,
+    strategy_id: str,
+    codes: Optional[List[str]],
+    screen_run_id: Optional[str],
+    sector: str,
+) -> bool:
+    if screen_run_id or codes:
+        return True
+    if sector in WATCHLIST_SECTORS:
+        return True
+    if strategy_id == "screening_rebalance":
+        return True
+    return False
+
+
+def rank_codes_by_turnover(universe: List[str], amounts: Dict[str, float], n: int) -> List[str]:
+    """Order by summed amount descending; empty if no positive turnover."""
+    scored = [(float(amounts.get(code) or 0), idx, code) for idx, code in enumerate(universe)]
+    if not any(amt > 0 for amt, _, _ in scored):
+        return []
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [code for _, _, code in scored[:n]]
+
+
+def load_turnover_sums(
+    universe: List[str],
+    *,
+    range_end: Optional[str] = None,
+    adjust_type: Optional[str] = None,
+    lookback: int = TURNOVER_LOOKBACK_BARS,
+) -> Dict[str, float]:
+    if not universe:
+        return {}
+    from qmt_quant.storage.database import db_session
+
+    adj = adjust_type or get_settings().bar_adjust_type
+    end = range_end
+    with db_session() as conn:
+        if end:
+            rows = conn.execute(
+                """
+                WITH recent AS (
+                    SELECT DISTINCT date
+                    FROM daily_bar
+                    WHERE adjust_type = %s AND date <= %s
+                    ORDER BY date DESC
+                    LIMIT %s
+                )
+                SELECT b.code, COALESCE(SUM(b.amount), 0)
+                FROM daily_bar b
+                INNER JOIN recent r ON b.date = r.date
+                WHERE b.adjust_type = %s AND b.code = ANY(%s)
+                GROUP BY b.code
+                """,
+                (adj, end, lookback, adj, list(universe)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                WITH recent AS (
+                    SELECT DISTINCT date
+                    FROM daily_bar
+                    WHERE adjust_type = %s
+                    ORDER BY date DESC
+                    LIMIT %s
+                )
+                SELECT b.code, COALESCE(SUM(b.amount), 0)
+                FROM daily_bar b
+                INNER JOIN recent r ON b.date = r.date
+                WHERE b.adjust_type = %s AND b.code = ANY(%s)
+                GROUP BY b.code
+                """,
+                (adj, lookback, adj, list(universe)),
+            ).fetchall()
+    return {str(code): float(amt or 0) for code, amt in rows}
+
+
+def resolve_research_universe_meta(
+    *,
+    sector: str = "沪深A股",
+    strategy_id: str = "ma_cross",
+    codes: Optional[List[str]] = None,
+    screen_run_id: Optional[str] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
+    range_end: Optional[str] = None,
+    adjust_type: Optional[str] = None,
+) -> Tuple[List[str], Dict[str, Any]]:
+    sample_mode = _normalize_sample(sample)
+    cap_n = _cap_n(universe_n)
+    meta: Dict[str, Any] = {
+        "sample": sample_mode,
+        "universe_n": cap_n,
+        "sample_fallback": None,
+        "sampled": False,
+    }
+
+    if screen_run_id:
+        universe = load_codes_by_run_id(screen_run_id)
+    elif codes:
+        universe = list(codes)
+    else:
+        universe = resolve_universe(sector)
+        if sector in WATCHLIST_SECTORS:
+            universe = resolve_universe("watchlist")
+    universe = list(universe or [])
+
+    if _explicit_pool(
+        strategy_id=strategy_id,
+        codes=codes,
+        screen_run_id=screen_run_id,
+        sector=sector,
+    ):
+        meta["universe_n"] = len(universe) if universe else cap_n
+        meta["sample"] = "head"
+        return universe, meta
+
+    if not universe:
+        return [], meta
+
+    meta["sampled"] = True
+    if sample_mode == "turnover":
+        amounts = load_turnover_sums(universe, range_end=range_end, adjust_type=adjust_type)
+        ranked = rank_codes_by_turnover(universe, amounts, cap_n)
+        if ranked:
+            return ranked, meta
+        meta["sample_fallback"] = "head"
+        meta["sample"] = "head"
+        return list(universe[:cap_n]), meta
+    return list(universe[:cap_n]), meta
 
 
 def resolve_research_universe(
@@ -16,20 +165,23 @@ def resolve_research_universe(
     strategy_id: str = "ma_cross",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
+    range_end: Optional[str] = None,
+    adjust_type: Optional[str] = None,
 ) -> List[str]:
     """Return the code list research would load (before price matrix fetch)."""
-    if screen_run_id:
-        universe = load_codes_by_run_id(screen_run_id)
-    elif codes:
-        universe = list(codes)
-    else:
-        universe = resolve_universe(sector)
-        if sector in ("watchlist", "我的自选池"):
-            universe = resolve_universe("watchlist")
-    cap = None if strategy_id == "screening_rebalance" else RESEARCH_UNIVERSE_CAP
-    if cap and universe:
-        return list(universe[:cap])
-    return list(universe) if universe else []
+    used, _meta = resolve_research_universe_meta(
+        sector=sector,
+        strategy_id=strategy_id,
+        codes=codes,
+        screen_run_id=screen_run_id,
+        sample=sample,
+        universe_n=universe_n,
+        range_end=range_end,
+        adjust_type=adjust_type,
+    )
+    return used
 
 
 def describe_research_universe(
@@ -38,30 +190,49 @@ def describe_research_universe(
     strategy_id: str = "ma_cross",
     codes: Optional[List[str]] = None,
     screen_run_id: Optional[str] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
+    range_end: Optional[str] = None,
 ) -> dict:
-    """Pool size vs actual research/backtest size (does not change sampling)."""
+    """Pool size vs actual research/backtest size."""
     if screen_run_id:
         pool = load_codes_by_run_id(screen_run_id)
     elif codes:
         pool = list(codes)
     else:
         pool = resolve_universe(sector)
-        if sector in ("watchlist", "我的自选池"):
+        if sector in WATCHLIST_SECTORS:
             pool = resolve_universe("watchlist")
     pool = list(pool or [])
-    used = resolve_research_universe(
+    used, meta = resolve_research_universe_meta(
         sector=sector,
         strategy_id=strategy_id,
         codes=codes,
         screen_run_id=screen_run_id,
+        sample=sample,
+        universe_n=universe_n,
+        range_end=range_end,
     )
-    cap = None if strategy_id == "screening_rebalance" else RESEARCH_UNIVERSE_CAP
     used_n = len(used)
+    sampled = bool(meta.get("sampled"))
+    fallback = meta.get("sample_fallback")
+    sample_mode = meta.get("sample") or "head"
+    if sampled and sample_mode == "turnover" and not fallback:
+        sample_label = f"近{TURNOVER_LOOKBACK_BARS}日成交额前 {used_n}"
+    elif sampled:
+        sample_label = f"代码序前 {used_n}"
+    else:
+        sample_label = "全部标的"
+    cap = None if not sampled else meta.get("universe_n")
     return {
         "pool_size": len(pool),
         "used": used_n,
-        "capped": cap is not None and len(pool) > used_n,
+        "capped": sampled and len(pool) > used_n,
         "cap": cap,
+        "sample": sample_mode,
+        "sample_fallback": fallback,
+        "sample_label": sample_label,
+        "universe_n": meta.get("universe_n"),
     }
 
 
@@ -71,8 +242,17 @@ def universe_from_research_run(research: dict) -> Optional[List[str]]:
     stored = params.get("codes")
     if stored:
         return [str(c) for c in stored if c]
+    range_end = None
+    preset = params.get("range_preset")
+    if preset:
+        from qmt_quant.core.presets import resolve_range_preset
+
+        _start, range_end = resolve_range_preset(str(preset))
     return resolve_research_universe(
         sector=str(params.get("sector") or "沪深A股"),
         strategy_id=str(research.get("strategy_id") or "ma_cross"),
         screen_run_id=params.get("screen_run_id"),
+        sample=str(params.get("sample") or "head"),
+        universe_n=params.get("universe_n"),
+        range_end=range_end,
     )

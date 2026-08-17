@@ -54,6 +54,8 @@ class CustomValidationEngine:
                 params.get("screen_run_id"),
                 rebalance_days=int(params.get("rebalance_days", 20)),
             )
+        if strategy_id == "signal_replay":
+            return engine.run_signals(params.get("signals") or [])
         return engine.run_ma_cross(
             int(params.get("short_window", 20)),
             int(params.get("long_window", 120)),

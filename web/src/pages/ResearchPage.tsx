@@ -10,6 +10,7 @@ import {
   researchCallout,
   simpleBacktestCallout,
   singleBacktestCallout,
+  strategyAllowedInPoolMode,
   strategyAllowedInSingleMode,
   usesMaPresets,
   type PastRunOption,
@@ -29,6 +30,7 @@ import ComparisonCard from "../components/ComparisonCard";
 import EmptyState from "../components/EmptyState";
 import StrategyErrorCard from "../components/StrategyErrorCard";
 import TechnicalDetails from "../components/TechnicalDetails";
+import SingleStockTradeView from "../components/SingleStockTradeView";
 
 type RunOption = PastRunOption;
 
@@ -58,7 +60,13 @@ export default function ResearchPage() {
     used: number;
     capped: boolean;
     cap: number | null;
+    sample?: string;
+    sample_label?: string;
+    sample_fallback?: string | null;
   } | null>(null);
+  const [sampleMode, setSampleMode] = useState("head");
+  const [universeN, setUniverseN] = useState("50");
+  const [signalText, setSignalText] = useState("");
 
   const [result, setResult] = useState<any>(null);
   const [runId, setRunId] = useState("");
@@ -86,12 +94,15 @@ export default function ResearchPage() {
     () =>
       isSingle
         ? strategies.filter((s) => strategyAllowedInSingleMode(s.id))
-        : strategies,
+        : strategies.filter((s) => strategyAllowedInPoolMode(s.id)),
     [isSingle, strategies]
   );
 
   useEffect(() => {
     if (isSingle && !strategyAllowedInSingleMode(strategy) && strategyOptions.length) {
+      setStrategy(strategyOptions[0].id);
+    }
+    if (!isSingle && !strategyAllowedInPoolMode(strategy) && strategyOptions.length) {
       setStrategy(strategyOptions[0].id);
     }
   }, [isSingle, strategy, strategyOptions]);
@@ -105,6 +116,23 @@ export default function ResearchPage() {
 
   function jobCodeField() {
     return isSingle && stockCode ? { code: stockCode } : {};
+  }
+
+  function samplingFields() {
+    if (!isPool || sector !== "沪深A股") return {};
+    return { sample: sampleMode, universe_n: Number(universeN) || 50 };
+  }
+
+  function parsedSignals() {
+    const rows: { date: string; side: string }[] = [];
+    for (const line of signalText.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.toLowerCase().startsWith("date")) continue;
+      const parts = trimmed.split(/[,;\t ]+/);
+      if (parts.length < 2) continue;
+      rows.push({ date: parts[0].slice(0, 10), side: parts[1] });
+    }
+    return rows;
   }
 
   useEffect(() => {
@@ -126,12 +154,25 @@ export default function ResearchPage() {
       setUniverseInfo(null);
       return;
     }
-    apiGet<{ pool_size: number; used: number; capped: boolean; cap: number | null }>(
-      `/api/options/research-universe?sector=${encodeURIComponent(sector)}&strategy=${encodeURIComponent(strategy)}`
-    )
+    const qs = new URLSearchParams({
+      sector,
+      strategy,
+      sample: sampleMode,
+      universe_n: universeN,
+      range_preset: range,
+    });
+    apiGet<{
+      pool_size: number;
+      used: number;
+      capped: boolean;
+      cap: number | null;
+      sample?: string;
+      sample_label?: string;
+      sample_fallback?: string | null;
+    }>(`/api/options/research-universe?${qs.toString()}`)
       .then(setUniverseInfo)
       .catch(() => setUniverseInfo(null));
-  }, [sector, strategy, isPool]);
+  }, [sector, strategy, isPool, sampleMode, universeN, range]);
 
   const loadResearchDetail = useCallback(async (id: string) => {
     const res = await apiGet<any>(`/api/research/${id}`);
@@ -285,6 +326,8 @@ export default function ResearchPage() {
         match,
         benchmark: "hs300",
         ...jobCodeField(),
+        ...samplingFields(),
+        ...(strategy === "signal_replay" ? { signals: parsedSignals() } : {}),
       },
       "策略回测运行中…",
       "backtest",
@@ -306,6 +349,7 @@ export default function ResearchPage() {
         short_preset: shortP,
         long_preset: longP,
         ...jobCodeField(),
+        ...samplingFields(),
       },
       "快速试策略扫描中…",
       "research",
@@ -334,6 +378,7 @@ export default function ResearchPage() {
         train_months: trainMonths,
         test_months: testMonths,
         ...jobCodeField(),
+        ...samplingFields(),
       },
       "Walk-Forward 分析中…",
       "walk_forward",
@@ -451,6 +496,29 @@ export default function ResearchPage() {
         {isPool && (
           <PresetSelect label="股票池" value={sector} options={sectors} onChange={setSector} />
         )}
+        {isPool && sector === "沪深A股" && (
+          <>
+            <PresetSelect
+              label="抽样"
+              value={sampleMode}
+              options={[
+                { id: "head", label: "代码序" },
+                { id: "turnover", label: "近20日成交额" },
+              ]}
+              onChange={setSampleMode}
+            />
+            <PresetSelect
+              label="抽样只数"
+              value={universeN}
+              options={[
+                { id: "50", label: "50" },
+                { id: "100", label: "100" },
+                { id: "300", label: "300" },
+              ]}
+              onChange={setUniverseN}
+            />
+          </>
+        )}
         <PresetSelect label="区间" value={range} options={ranges} onChange={setRange} />
         {isBacktestLike ? (
           <PresetSelect
@@ -476,7 +544,8 @@ export default function ResearchPage() {
 
       {isPool && universeInfo?.capped && (
         <p className="mt-2 text-xs text-amber-300/90">
-          股票池共 {universeInfo.pool_size} 只，本次回测/扫描只取前 {universeInfo.used} 只（上限 {universeInfo.cap}）。
+          股票池共 {universeInfo.pool_size} 只，本次按「{universeInfo.sample_label || `代码序前 ${universeInfo.used}`}」取样。
+          {universeInfo.sample_fallback === "head" ? " 成交额不足，已回退为代码序。" : ""}
           {sector === "watchlist" ? (
             <>
               <Link to="/data#watchlist" className="ml-1 underline hover:text-slate-200">
@@ -496,6 +565,19 @@ export default function ResearchPage() {
           </Link>
           。
         </p>
+      )}
+
+      {isSingle && strategy === "signal_replay" && (
+        <div className="card mt-4">
+          <label className="label">信号表（date,side）</label>
+          <textarea
+            className="input min-h-[120px] w-full font-mono text-xs"
+            value={signalText}
+            onChange={(e) => setSignalText(e.target.value)}
+            placeholder={"date,side\n2024-01-05,buy\n2024-03-01,S"}
+          />
+          <p className="mt-1 text-xs text-slate-500">每行一条；side 支持 buy/sell、B/S、买入/卖出。无行情的日期会跳过。</p>
+        </div>
       )}
 
       {strategy === "pe_momentum" && (
@@ -716,32 +798,19 @@ export default function ResearchPage() {
                 benchmark={effectiveValidateDetail.benchmark_curve}
               />
             )}
-            {isSingle && effectiveValidateDetail.trades?.length > 0 && (
-              <div className="mt-4 overflow-x-auto">
-                <p className="mb-2 text-sm font-medium text-slate-300">成交明细</p>
-                <table className="w-full text-left text-sm">
-                  <thead className="text-xs text-slate-500">
-                    <tr>
-                      <th className="pb-2 pr-3">日期</th>
-                      <th className="pb-2 pr-3">方向</th>
-                      <th className="pb-2 pr-3">价格</th>
-                      <th className="pb-2 pr-3">数量</th>
-                      <th className="pb-2">费用</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-slate-300">
-                    {effectiveValidateDetail.trades.map((t: any, i: number) => (
-                      <tr key={`${t.date}-${t.side}-${i}`} className="border-t border-slate-800">
-                        <td className="py-2 pr-3">{t.date}</td>
-                        <td className="py-2 pr-3">{t.side}</td>
-                        <td className="py-2 pr-3">{t.price}</td>
-                        <td className="py-2 pr-3">{t.quantity}</td>
-                        <td className="py-2">{t.fee}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            {isSingle && (
+              <SingleStockTradeView
+                code={effectiveValidateDetail.codes?.[0] || stockCode}
+                trades={effectiveValidateDetail.trades || []}
+                tradesTruncated={Boolean(effectiveValidateDetail.trades_truncated)}
+                equity={effectiveValidateDetail.equity_curve}
+              />
+            )}
+            {isSingle && Array.isArray(effectiveValidateDetail.skipped_signals) && effectiveValidateDetail.skipped_signals.length > 0 && (
+              <p className="mt-2 text-xs text-amber-300/90">
+                已跳过 {effectiveValidateDetail.skipped_signals.length} 条无行情/无效信号：
+                {effectiveValidateDetail.skipped_signals.map((s: { date?: string }) => s.date).filter(Boolean).join("、")}
+              </p>
             )}
             {effectiveValidateDetail.research_best && (
               <p className="mt-2 text-xs text-slate-500">

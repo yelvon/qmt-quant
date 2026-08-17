@@ -23,9 +23,25 @@ def run_backtest(
     benchmark: str = "hs300",
     screen_run_id: Optional[str] = None,
     codes: Optional[list[str]] = None,
+    sample: str = "head",
+    universe_n: Optional[int] = None,
+    signals: Optional[list] = None,
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run parameter scan (research) then high-fidelity validation in one job."""
+    if strategy_id == "signal_replay":
+        if job_id:
+            report_job_progress(job_id, 0.2, "按信号表回放…", step="backtest")
+        return run_validation(
+            strategy_id="signal_replay",
+            range_preset=range_preset,
+            match_price=match_price,
+            benchmark=benchmark,
+            codes=codes,
+            signals=signals or [],
+            job_id=job_id,
+        )
+
     if job_id:
         report_job_progress(
             job_id,
@@ -44,6 +60,8 @@ def run_backtest(
         fee_preset=fee_preset,
         screen_run_id=screen_run_id,
         codes=codes,
+        sample=sample,
+        universe_n=universe_n,
         job_id=None,
     )
     if research.get("error"):

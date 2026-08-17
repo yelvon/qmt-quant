@@ -37,12 +37,10 @@ def test_run_backtest_chains_research_then_validation():
 
     r_mock.assert_called_once()
     assert r_mock.call_args.kwargs["job_id"] is None
-    v_mock.assert_called_once_with(
-        from_run_id="r1",
-        match_price="next_open",
-        benchmark="hs300",
-        job_id="job-1",
-    )
+    assert v_mock.call_args.kwargs["from_run_id"] == "r1"
+    assert v_mock.call_args.kwargs["match_price"] == "next_open"
+    assert v_mock.call_args.kwargs["benchmark"] == "hs300"
+    assert v_mock.call_args.kwargs["job_id"] == "job-1"
     assert out["run_id"] == "v1"
     assert out["research_run_id"] == "r1"
     assert out["research_best"]["label"] == "10/30"
@@ -68,3 +66,18 @@ def test_run_backtest_propagates_research_error():
             out = run_backtest(strategy_id="ma_cross")
     assert out["error"] == "no_price_data"
     v_mock.assert_not_called()
+
+
+def test_run_backtest_signal_replay_skips_research():
+    validate_out = {"run_id": "v1", "trade_count": 2}
+    with patch("qmt_quant.core.backtest.runner.run_research") as r_mock:
+        with patch("qmt_quant.core.backtest.runner.run_validation", return_value=validate_out) as v_mock:
+            out = run_backtest(
+                strategy_id="signal_replay",
+                codes=["600519.SH"],
+                signals=[{"date": "2024-01-03", "side": "buy"}],
+            )
+    r_mock.assert_not_called()
+    assert v_mock.call_args.kwargs["strategy_id"] == "signal_replay"
+    assert v_mock.call_args.kwargs["signals"] == [{"date": "2024-01-03", "side": "buy"}]
+    assert out["run_id"] == "v1"
