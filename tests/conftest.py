@@ -26,6 +26,8 @@ def _truncate_all(database_url: str) -> None:
         "financial_cashflow",
         "financial_pershareindex",
         "daily_bar",
+        "index_daily_bar",
+        "index_instrument",
         "instrument",
         "trade_calendar",
         "sync_meta",
@@ -36,6 +38,12 @@ def _truncate_all(database_url: str) -> None:
             + ", ".join(tables)
             + " RESTART IDENTITY CASCADE"
         )
+    try:
+        from qmt_quant.core.data.query import clear_browse_query_cache
+
+        clear_browse_query_cache()
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")

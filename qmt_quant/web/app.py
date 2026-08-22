@@ -387,7 +387,10 @@ def create_app() -> FastAPI:
                 msg = "未找到该股票，请尝试输入代码（如 600519）或完整名称"
             raise HTTPException(status_code=400, detail=msg) from exc
         with db_session() as conn:
-            meta["available_adjust_types"] = list_available_adjust_types(conn)
+            if table == "index_daily_bar":
+                meta["available_adjust_types"] = []
+            else:
+                meta["available_adjust_types"] = list_available_adjust_types(conn)
         return {"ok": True, **meta}
 
     @app.get("/api/data/tables")
@@ -467,6 +470,14 @@ def create_app() -> FastAPI:
             remaining = count_missing_names(conn)
         return {"updated": updated, "remaining": int(remaining or 0)}
 
+    @app.get("/api/data/index-instruments")
+    def api_index_instruments() -> Dict[str, Any]:
+        from qmt_quant.storage.index_bars import list_index_instruments
+
+        with db_session() as conn:
+            items = list_index_instruments(conn)
+        return {"ok": True, "items": items}
+
     @app.get("/api/data/kline")
     def api_data_kline(
         code: str,
@@ -484,10 +495,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=msg) from exc
 
     @app.get("/api/data/dates")
-    def api_data_dates(adjust: str = "front") -> Dict[str, Any]:
+    def api_data_dates(adjust: str = "front", table: str = "daily_bar") -> Dict[str, Any]:
         try:
             with db_session() as conn:
-                return {"ok": True, **get_date_range(conn, adjust)}
+                return {"ok": True, **get_date_range(conn, adjust, table=table)}
         except ValueError as exc:
             msg = str(exc)
             if msg == "unknown_stock":

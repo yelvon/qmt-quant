@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from qmt_quant.adapters.qmt.client import normalize_code
 from qmt_quant.core.ttl_cache import TtlCache
 from qmt_quant.storage.database import DbConnection
+from qmt_quant.storage.index_bars import index_date_range
 
 _SORT_COL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _CODE_RE = re.compile(r"^\d{6}(\.(SH|SZ))?$", re.IGNORECASE)
@@ -35,6 +36,20 @@ _DAILY_BAR_SORT = {
     "amount",
     "change_pct",
     "name",
+}
+
+_INDEX_BAR_SORT = {
+    "code",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "change_pct",
+    "name",
+    "kind",
 }
 
 _INSTRUMENT_SORT = {"code", "name", "list_date", "delist_date", "is_st"}
@@ -75,11 +90,20 @@ def list_available_adjust_types(conn: DbConnection) -> List[str]:
     return [r[0] for r in rows]
 
 
-def get_date_range(conn: DbConnection, adjust_type: str = "front") -> Dict[str, Optional[str]]:
-    cache_key = adjust_type
+def get_date_range(
+    conn: DbConnection,
+    adjust_type: str = "front",
+    table: str = "daily_bar",
+) -> Dict[str, Optional[str]]:
+    cache_key = f"{table}:{adjust_type}"
     cached = _DATE_RANGE_CACHE.get(cache_key)
     if cached is not None:
         return cached
+
+    if table == "index_daily_bar":
+        result = index_date_range(conn)
+        _DATE_RANGE_CACHE.set(cache_key, result)
+        return result
 
     row = conn.execute(
         "SELECT MIN(date), MAX(date) FROM daily_bar WHERE adjust_type = %s",
@@ -161,6 +185,173 @@ def _bar_rows_to_dicts(rows: List[tuple], names: Dict[str, Optional[str]]) -> Li
         item["name"] = names.get(item["code"])
         out.append(item)
     return out
+
+
+def _normalize_index_code(conn: DbConnection, code: str) -> str:
+    raw = (code or "").strip().upper()
+    if not raw:
+        raise ValueError("missing_code")
+    if _CODE_RE.match(raw) or "." in raw:
+        return normalize_code(raw)
+    row = conn.execute(
+        """
+        SELECT code FROM index_instrument
+        WHERE code = %s OR name = %s OR name LIKE %s
+        ORDER BY kind, code
+        LIMIT 1
+        """,
+        (raw, raw, f"%{raw}%"),
+    ).fetchone()
+    if row:
+        return row[0]
+    raise ValueError("unknown_stock")
+
+
+def _query_index_cross_section(
+    conn: DbConnection,
+    *,
+    date: str,
+    q: Optional[str],
+    sort: str,
+    direction: str,
+    page: int,
+    page_size: int,
+    offset: int,
+) -> Dict[str, Any]:
+    order_col = {
+        "code": "b.code",
+        "date": "b.date",
+        "open": "b.open",
+        "high": "b.high",
+        "low": "b.low",
+        "close": "b.close",
+        "volume": "b.volume",
+        "amount": "b.amount",
+        "name": "i.name",
+        "kind": "i.kind",
+        "change_pct": "change_pct",
+    }.get(sort, "b.code")
+    where = ["b.date = %s"]
+    params: List[Any] = [date]
+    if q and q.strip():
+        where.append("(b.code LIKE %s OR i.name LIKE %s OR i.kind LIKE %s)")
+        like = f"%{q.strip()}%"
+        params.extend([like, like, like])
+    where_sql = " AND ".join(where)
+    total = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM index_daily_bar b
+        LEFT JOIN index_instrument i ON i.code = b.code
+        WHERE {where_sql}
+        """,
+        params,
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"""
+        SELECT b.code, b.date, b.open, b.high, b.low, b.close,
+               b.volume, b.amount, b.pre_close,
+               CASE WHEN b.pre_close > 0 THEN (b.close - b.pre_close) / b.pre_close * 100
+                    ELSE NULL END AS change_pct,
+               COALESCE(i.name, b.code) AS name,
+               COALESCE(i.kind, '') AS kind
+        FROM index_daily_bar b
+        LEFT JOIN index_instrument i ON i.code = b.code
+        WHERE {where_sql}
+        ORDER BY {order_col} {direction}
+        LIMIT %s OFFSET %s
+        """,
+        [*params, page_size, offset],
+    ).fetchall()
+    cols = [
+        "code", "date", "open", "high", "low", "close",
+        "volume", "amount", "pre_close", "change_pct", "name", "kind",
+    ]
+    kind_label = {"benchmark": "基准", "industry": "行业"}
+    out = []
+    for r in rows:
+        item = dict(zip(cols, r))
+        item["kind"] = kind_label.get(str(item.get("kind") or ""), item.get("kind"))
+        out.append(item)
+    return {
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
+        "rows": out,
+    }
+
+
+def _query_index_series(
+    conn: DbConnection,
+    *,
+    code: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    sort: str,
+    direction: str,
+    page: int,
+    page_size: int,
+    offset: int,
+) -> Dict[str, Any]:
+    norm = _normalize_index_code(conn, code)
+    order_col = {
+        "code": "b.code",
+        "date": "b.date",
+        "open": "b.open",
+        "high": "b.high",
+        "low": "b.low",
+        "close": "b.close",
+        "volume": "b.volume",
+        "amount": "b.amount",
+        "name": "i.name",
+        "kind": "i.kind",
+        "change_pct": "change_pct",
+    }.get(sort, "b.date")
+    where = ["b.code = %s"]
+    params: List[Any] = [norm]
+    if date_from:
+        where.append("b.date >= %s")
+        params.append(date_from)
+    if date_to:
+        where.append("b.date <= %s")
+        params.append(date_to)
+    where_sql = " AND ".join(where)
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM index_daily_bar b WHERE {where_sql}",
+        params,
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"""
+        SELECT b.code, b.date, b.open, b.high, b.low, b.close,
+               b.volume, b.amount, b.pre_close,
+               CASE WHEN b.pre_close > 0 THEN (b.close - b.pre_close) / b.pre_close * 100
+                    ELSE NULL END AS change_pct,
+               COALESCE(i.name, b.code) AS name,
+               COALESCE(i.kind, '') AS kind
+        FROM index_daily_bar b
+        LEFT JOIN index_instrument i ON i.code = b.code
+        WHERE {where_sql}
+        ORDER BY {order_col} {direction}
+        LIMIT %s OFFSET %s
+        """,
+        [*params, page_size, offset],
+    ).fetchall()
+    cols = [
+        "code", "date", "open", "high", "low", "close",
+        "volume", "amount", "pre_close", "change_pct", "name", "kind",
+    ]
+    kind_label = {"benchmark": "基准", "industry": "行业"}
+    out = []
+    for r in rows:
+        item = dict(zip(cols, r))
+        item["kind"] = kind_label.get(str(item.get("kind") or ""), item.get("kind"))
+        out.append(item)
+    return {
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
+        "rows": out,
+    }
 
 
 def _cross_section_count_cache_key(
@@ -420,6 +611,37 @@ def query_table(
             "page_size": page_size,
             "rows": _bar_rows_to_dicts(bar_rows, names),
         }
+
+    if table == "index_daily_bar" and view_mode == "cross_section":
+        if not date:
+            raise ValueError("missing_date")
+        sort = _validate_sort(sort_col, _INDEX_BAR_SORT)
+        return _query_index_cross_section(
+            conn,
+            date=date,
+            q=q or code,
+            sort=sort,
+            direction=direction,
+            page=page,
+            page_size=page_size,
+            offset=offset,
+        )
+
+    if table == "index_daily_bar" and view_mode == "series":
+        if not code:
+            raise ValueError("missing_code")
+        sort = _validate_sort(sort_col or "date", _INDEX_BAR_SORT)
+        return _query_index_series(
+            conn,
+            code=code,
+            date_from=date_from,
+            date_to=date_to,
+            sort=sort,
+            direction=direction,
+            page=page,
+            page_size=page_size,
+            offset=offset,
+        )
 
     if table == "instrument" and view_mode == "instrument_list":
         sort = _validate_sort(sort_col, _INSTRUMENT_SORT)

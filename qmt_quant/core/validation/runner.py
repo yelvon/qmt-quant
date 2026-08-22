@@ -344,14 +344,30 @@ def _benchmark_curve(benchmark: str, start: str | None, end: str | None) -> list
     if benchmark != "hs300":
         return []
     try:
-        prices = load_price_matrix(codes=["000300.SH"], start_date=start, end_date=end)
-        if prices.empty or "000300.SH" not in prices.columns:
+        clauses = ["code = %s"]
+        params: list = ["000300.SH"]
+        if start:
+            clauses.append("date >= %s")
+            params.append(start)
+        if end:
+            clauses.append("date <= %s")
+            params.append(end)
+        sql = f"""
+            SELECT date, close FROM index_daily_bar
+            WHERE {" AND ".join(clauses)}
+            ORDER BY date
+        """
+        with db_session() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        if not rows:
             return []
-        s = prices["000300.SH"].dropna()
-        base = float(s.iloc[0])
+        base = float(rows[0][1])
+        if base == 0:
+            return []
         return [
-            {"date": dt.strftime("%Y-%m-%d"), "equity": round(float(v) / base * 100, 2)}
-            for dt, v in s.items()
+            {"date": str(dt), "equity": round(float(close) / base * 100, 2)}
+            for dt, close in rows
+            if close is not None
         ]
     except Exception:
         return []

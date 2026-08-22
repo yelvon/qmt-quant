@@ -9,8 +9,10 @@ import StockSearchInput from "../components/StockSearchInput";
 import {
   fetchDataQuery,
   fetchDateRange,
+  fetchIndexInstruments,
   fetchKline,
   fetchTableMeta,
+  type IndexInstrument,
   type KlinePayload,
   type QueryResult,
   type TableMeta,
@@ -18,6 +20,7 @@ import {
 import { defaultOneYearRange, rangeForPreset, todayISO, type DatePresetId } from "../lib/dateUtils";
 
 type TabId = "cross_section" | "series" | "kline";
+type SourceId = "daily_bar" | "index_daily_bar";
 
 const ADJUST_FALLBACK = [
   { id: "front", label: "前复权" },
@@ -28,16 +31,22 @@ const ADJUST_FALLBACK = [
 export default function DataBrowsePage() {
   const [params] = useSearchParams();
   const tabParam = params.get("tab");
+  const tableParam = params.get("table") || "";
   const codeParam = params.get("code") || "";
   const initialTab: TabId =
     tabParam === "cross_section" || tabParam === "series" || tabParam === "kline"
       ? tabParam
       : "kline";
+  const initialSource: SourceId =
+    tableParam === "index_daily_bar" ? "index_daily_bar" : "daily_bar";
+  const [source, setSource] = useState<SourceId>(initialSource);
   const [tab, setTab] = useState<TabId>(initialTab);
   const [meta, setMeta] = useState<TableMeta | null>(null);
   const [adjust, setAdjust] = useState("front");
   const [date, setDate] = useState("");
-  const [code, setCode] = useState(codeParam || "600519.SH");
+  const [code, setCode] = useState(
+    codeParam || (initialSource === "index_daily_bar" ? "000300.SH" : "600519.SH")
+  );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [dateMin, setDateMin] = useState<string | null>(null);
@@ -55,20 +64,38 @@ export default function DataBrowsePage() {
   const [page, setPage] = useState(1);
   const [sortCol, setSortCol] = useState("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [indexList, setIndexList] = useState<IndexInstrument[]>([]);
+  const isIndex = source === "index_daily_bar";
 
   useEffect(() => {
-    fetchTableMeta("daily_bar").then((m) => {
+    fetchTableMeta(source).then((m) => {
       setMeta(m);
       if (m.available_adjust_types?.length && !m.available_adjust_types.includes(adjust)) {
         setAdjust(m.available_adjust_types[0]);
       }
     });
-  }, []);
+  }, [source]);
+
+  useEffect(() => {
+    if (!isIndex) {
+      setIndexList([]);
+      return;
+    }
+    fetchIndexInstruments()
+      .then((items) => {
+        setIndexList(items);
+        if (items.length && !items.some((it) => it.code === code)) {
+          const hs = items.find((it) => it.code === "000300.SH");
+          setCode((hs || items[0]).code);
+        }
+      })
+      .catch(() => setIndexList([]));
+  }, [isIndex]);
 
   useEffect(() => {
     setDatesLoading(true);
     setFiltersReady(false);
-    fetchDateRange(adjust)
+    fetchDateRange(isIndex ? "none" : adjust, source)
       .then((r) => {
         const max = r.max_date || todayISO();
         setDateMin(r.min_date);
@@ -91,7 +118,7 @@ export default function DataBrowsePage() {
         setFiltersReady(true);
       })
       .finally(() => setDatesLoading(false));
-  }, [adjust]);
+  }, [adjust, source, isIndex]);
 
   const loadCrossSection = useCallback(async () => {
     if (!date) return;
@@ -99,11 +126,12 @@ export default function DataBrowsePage() {
     setError(null);
     try {
       const res = await fetchDataQuery({
-        table: "daily_bar",
+        table: source,
         view_mode: "cross_section",
         date,
-        adjust,
-        code: codeFilter || undefined,
+        adjust: isIndex ? undefined : adjust,
+        code: isIndex ? undefined : codeFilter || undefined,
+        q: isIndex ? codeFilter || undefined : undefined,
         page,
         page_size: 100,
         sort_col: sortCol,
@@ -113,13 +141,16 @@ export default function DataBrowsePage() {
         ...res,
         columns: res.columns?.length ? res.columns : meta?.columns || [],
       });
+      if (isIndex && res.total === 0) {
+        setError("指数日线为空。请先在②同步日线（指数随日线任务写入独立表）。");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setQuery(null);
     } finally {
       setLoading(false);
     }
-  }, [date, adjust, codeFilter, page, sortCol, sortDir, meta?.columns]);
+  }, [date, adjust, codeFilter, page, sortCol, sortDir, meta?.columns, source, isIndex]);
 
   const loadSeries = useCallback(
     async (overrides?: { code?: string; from?: string; to?: string }) => {
@@ -131,12 +162,12 @@ export default function DataBrowsePage() {
       setError(null);
       try {
         const res = await fetchDataQuery({
-          table: "daily_bar",
+          table: source,
           view_mode: "series",
           code: queryCode,
           date_from: from,
           date_to: to,
-          adjust,
+          adjust: isIndex ? undefined : adjust,
           page,
           page_size: 100,
           sort_col: sortCol || "date",
@@ -149,6 +180,9 @@ export default function DataBrowsePage() {
         if (res.rows[0]?.code && String(res.rows[0].code) !== code) {
           setCode(String(res.rows[0].code));
         }
+        if (isIndex && res.total === 0) {
+          setError("指数日线为空。请先在②同步日线（指数随日线任务写入独立表）。");
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setQuery(null);
@@ -156,7 +190,7 @@ export default function DataBrowsePage() {
         setLoading(false);
       }
     },
-    [code, dateFrom, dateTo, adjust, page, sortCol, sortDir, meta?.columns]
+    [code, dateFrom, dateTo, adjust, page, sortCol, sortDir, meta?.columns, source, isIndex]
   );
 
   const queryKline = useCallback(
@@ -165,7 +199,7 @@ export default function DataBrowsePage() {
       const from = overrides?.from ?? dateFrom;
       const to = overrides?.to ?? dateTo;
       if (!queryCode) {
-        setKlineError("请选择或输入股票代码/名称");
+        setKlineError(isIndex ? "请选择指数" : "请选择或输入股票代码/名称");
         return;
       }
       if (!from || !to) {
@@ -179,7 +213,7 @@ export default function DataBrowsePage() {
           code: queryCode,
           date_from: from,
           date_to: to,
-          adjust,
+          adjust: isIndex ? "none" : adjust,
         });
         setKline(res);
         if (res.code && res.code !== code) setCode(res.code);
@@ -191,7 +225,7 @@ export default function DataBrowsePage() {
         setKlineLoading(false);
       }
     },
-    [code, dateFrom, dateTo, adjust]
+    [code, dateFrom, dateTo, adjust, isIndex]
   );
 
   useEffect(() => {
@@ -206,7 +240,7 @@ export default function DataBrowsePage() {
     } else if (tab === "kline") {
       void queryKline();
     }
-  }, [tab, filtersReady]);
+  }, [tab, filtersReady, source]);
 
   function handleDateRangeChange(from: string, to: string, preset?: DatePresetId | null) {
     setDateFrom(from);
@@ -251,6 +285,19 @@ export default function DataBrowsePage() {
     void queryKline({ code: c });
   }
 
+  function switchSource(next: SourceId) {
+    if (next === source) return;
+    setSource(next);
+    setPage(1);
+    setQuery(null);
+    setKline(null);
+    setError(null);
+    setKlineError(null);
+    setCodeFilter("");
+    setCode(next === "index_daily_bar" ? "000300.SH" : "600519.SH");
+    setTab("cross_section");
+  }
+
   const adjustOptions =
     meta?.adjust_options?.filter(
       (o) => !meta.available_adjust_types?.length || meta.available_adjust_types.includes(o.id)
@@ -261,18 +308,51 @@ export default function DataBrowsePage() {
     { id: "series", label: "时间序列" },
     { id: "kline", label: "K 线" },
   ];
+  const sources: { id: SourceId; label: string }[] = [
+    { id: "daily_bar", label: "股票日线" },
+    { id: "index_daily_bar", label: "指数日线" },
+  ];
 
   const canQuerySeries = Boolean(code.trim() && dateFrom && dateTo && !datesLoading);
+  const indexOptions = indexList.map((it) => ({
+    id: it.code,
+    label: `${it.name || it.code} ${it.code}${it.kind === "industry" ? " · 行业" : " · 基准"}`,
+  }));
 
   return (
     <div>
       <PageCallout>
-        浏览已同步的日线与证券列表。若无数据或名称显示「—」，请先在{" "}
-        <Link to="/data" className="text-emerald-400 hover:underline">
-          ② 准备数据
-        </Link>{" "}
-        同步日线，并在「其他操作」中点「补全股票名称」。全量同步会自动补全名称；增量同步默认跳过（避免 5000+ 逐只调 QMT 拖慢更新）。
+        {isIndex ? (
+          <>
+            浏览基准与申万一级行业指数（独立表，不复权）。空表请先在{" "}
+            <Link to="/data" className="text-emerald-400 hover:underline">
+              ② 准备数据
+            </Link>{" "}
+            同步日线——指数会随股票日线任务一并写入。
+          </>
+        ) : (
+          <>
+            浏览已同步的日线与证券列表。若无数据或名称显示「—」，请先在{" "}
+            <Link to="/data" className="text-emerald-400 hover:underline">
+              ② 准备数据
+            </Link>{" "}
+            同步日线，并在「其他操作」中点「补全股票名称」。全量同步会自动补全名称；增量同步默认跳过（避免 5000+ 逐只调 QMT 拖慢更新）。
+          </>
+        )}
       </PageCallout>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        {sources.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={source === s.id ? "btn-primary" : "btn-secondary"}
+            onClick={() => switchSource(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
         {tabs.map((t) => (
@@ -293,7 +373,9 @@ export default function DataBrowsePage() {
       <div className="card mb-4 space-y-4">
         {tab === "cross_section" && (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
+            {!isIndex && (
+              <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
+            )}
             <label className="block text-sm">
               <span className="label">交易日</span>
               <input
@@ -309,10 +391,10 @@ export default function DataBrowsePage() {
               />
             </label>
             <label className="block text-sm">
-              <span className="label">代码或名称（可选）</span>
+              <span className="label">{isIndex ? "代码/名称/类型（可选）" : "代码或名称（可选）"}</span>
               <input
                 className="input"
-                placeholder="600519 或 贵州茅台"
+                placeholder={isIndex ? "000300 或 沪深300 或 基准" : "600519 或 贵州茅台"}
                 value={codeFilter}
                 onChange={(e) => {
                   setCodeFilter(e.target.value);
@@ -331,19 +413,47 @@ export default function DataBrowsePage() {
         {(tab === "series" || tab === "kline") && (
           <>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
-              <div className="lg:col-span-2">
-                <StockSearchInput
-                  value={code}
-                  onChange={setCode}
-                  onResolved={(resolved) => {
-                    if (tab === "kline") void queryKline({ code: resolved });
-                    if (tab === "series") {
-                      void loadSeries({ code: resolved });
-                      void queryKline({ code: resolved });
-                    }
-                  }}
-                />
+              {!isIndex && (
+                <PresetSelect label="复权" value={adjust} options={adjustOptions} onChange={setAdjust} />
+              )}
+              <div className={isIndex ? "lg:col-span-3" : "lg:col-span-2"}>
+                {isIndex ? (
+                  indexOptions.length ? (
+                    <PresetSelect
+                      label="指数"
+                      value={code}
+                      options={indexOptions}
+                      onChange={(next) => {
+                        setCode(next);
+                        if (tab === "kline") void queryKline({ code: next });
+                        if (tab === "series") {
+                          void loadSeries({ code: next });
+                          void queryKline({ code: next });
+                        }
+                      }}
+                    />
+                  ) : (
+                    <p className="text-sm text-amber-200">
+                      尚未发现已同步指数。请先在{" "}
+                      <Link to="/data" className="underline">
+                        ② 准备数据
+                      </Link>{" "}
+                      同步日线。
+                    </p>
+                  )
+                ) : (
+                  <StockSearchInput
+                    value={code}
+                    onChange={setCode}
+                    onResolved={(resolved) => {
+                      if (tab === "kline") void queryKline({ code: resolved });
+                      if (tab === "series") {
+                        void loadSeries({ code: resolved });
+                        void queryKline({ code: resolved });
+                      }
+                    }}
+                  />
+                )}
               </div>
             </div>
             <DateRangePicker
@@ -358,7 +468,9 @@ export default function DataBrowsePage() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
               <p className="text-xs text-slate-500">
                 {canQuerySeries
-                  ? "支持代码/名称搜索；点快捷日期后会自动查询"
+                  ? isIndex
+                    ? "指数不复权；点快捷日期后会自动查询"
+                    : "支持代码/名称搜索；点快捷日期后会自动查询"
                   : "正在准备默认日期…"}
               </p>
               <button
@@ -378,17 +490,10 @@ export default function DataBrowsePage() {
         <div className="card">
           {error && (
             <p className="mb-3 text-sm text-red-300">
-              {error}
-              {(error.includes("无数据") || error.includes("empty") || error.toLowerCase().includes("no ")) && (
-                <>
-                  {" "}
-                  当前复权可能尚未同步，请到{" "}
-                  <Link to="/data" className="text-emerald-300 underline">
-                    ② 准备数据
-                  </Link>{" "}
-                  按该复权方式同步。
-                </>
-              )}
+              {error}{" "}
+              <Link to="/data" className="text-emerald-300 underline">
+                ② 准备数据
+              </Link>
             </p>
           )}
           {query ? (
@@ -416,7 +521,7 @@ export default function DataBrowsePage() {
           {klineError && !klineLoading && (
             <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               {klineError}
-              {klineError.includes("同步") && (
+              {(klineError.includes("同步") || klineError.includes("指数日线")) && (
                 <>
                   {" "}
                   <Link to="/data" className="text-emerald-300 underline">

@@ -8,6 +8,7 @@ import pandas as pd
 
 from qmt_quant.adapters.qmt.client import normalize_code
 from qmt_quant.storage.bars import BarRow
+from qmt_quant.storage.index_bars import IndexBarRow
 
 
 def bars_from_dataframe(
@@ -41,6 +42,27 @@ def bars_from_dataframe(
                 amount=_num(row.get("amount")),
                 pre_close=_num(row.get("pre_close") or row.get("preclose")),
                 quality_status=quality,
+            )
+        )
+    return rows
+
+
+def index_bars_from_dataframe(code: str, df: pd.DataFrame) -> List[IndexBarRow]:
+    rows: List[IndexBarRow] = []
+    for bar in bars_from_dataframe(code, df, adjust_type="none"):
+        rows.append(
+            IndexBarRow(
+                code=bar.code,
+                date=bar.date,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+                amount=bar.amount,
+                pre_close=bar.pre_close,
+                turnover=None,
+                quality_status=bar.quality_status,
             )
         )
     return rows

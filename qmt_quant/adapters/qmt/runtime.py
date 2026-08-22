@@ -288,6 +288,10 @@ class XtDataBridgeClient:
         result = _run_xt_worker("get_sector_stocks", {"sector": sector})
         return [str(c) for c in result.get("codes") or []]
 
+    def get_sector_list(self) -> List[str]:
+        result = _run_xt_worker("get_sector_list", {})
+        return [str(s) for s in result.get("sectors") or []]
+
     def get_instrument_detail(self, code: str) -> Dict[str, Any]:
         result = _run_xt_worker("get_instrument_detail", {"code": code})
         return result.get("detail") or {}

@@ -7,7 +7,7 @@ from typing import Dict, List, Literal, Optional
 
 from qmt_quant.adapters.qmt.client import XtDataClient
 from qmt_quant.config import get_settings
-from qmt_quant.core.jobs.context import is_job_cancelled, report_job_progress, sync_progress_message
+from qmt_quant.core.jobs.context import JobCancelled, is_job_cancelled, report_job_progress, sync_progress_message
 from qmt_quant.core.presets import DIVIDEND_MAP, resolve_range_preset
 from qmt_quant.core.sync.calendar import sync_calendar_from_bars, sync_calendar_from_qmt
 from qmt_quant.core.sync.gaps import RepairPlan
@@ -121,8 +121,6 @@ def sync_bars(
                 detail=f"{sector} · {effective_mode}",
             )
         if job_id and is_job_cancelled(job_id):
-            from qmt_quant.core.jobs.context import JobCancelled
-
             raise JobCancelled(
                 {
                     "remaining_codes": [],
@@ -162,20 +160,26 @@ def sync_bars(
     dividend = DIVIDEND_MAP.get(adjust_type, "front")
 
     written = 0
-    written = _fetch_and_upsert(
-        client,
-        codes,
-        start,
-        end,
-        adjust_type,
-        dividend,
-        settings.sync_batch_size,
-        job_id=job_id,
-        processed_base=processed_base,
-        total_codes=total_codes,
-        sector=sector,
-        mode=effective_mode,
-    )
+    stock_error: Optional[BaseException] = None
+    try:
+        written = _fetch_and_upsert(
+            client,
+            codes,
+            start,
+            end,
+            adjust_type,
+            dividend,
+            settings.sync_batch_size,
+            job_id=job_id,
+            processed_base=processed_base,
+            total_codes=total_codes,
+            sector=sector,
+            mode=effective_mode,
+        )
+    except JobCancelled:
+        raise
+    except Exception as exc:
+        stock_error = exc
     with db_session() as conn:
         market_latest = market_latest_date(conn, adjust_type)
         if market_latest:
@@ -185,6 +189,26 @@ def sync_bars(
         sync_calendar_from_qmt(start_date=start, end_date=end)
     except Exception:
         sync_calendar_from_bars()
+
+    index_result: Dict[str, object] = {}
+    try:
+        from qmt_quant.core.sync.index_sync import sync_index_bars
+
+        index_result = sync_index_bars(
+            client=client,
+            job_start=start,
+            job_end=end,
+            job_id=job_id,
+            repair=False,
+        )
+    except Exception as exc:
+        index_result = {
+            "index_codes": 0,
+            "index_bars_written": 0,
+            "index_failed": ["*"],
+            "index_error": str(exc),
+            "industry_source_sector": None,
+        }
 
     names_backfilled = 0
     names_skipped = 0
@@ -225,6 +249,7 @@ def sync_bars(
         "adjust_type": adjust_type,
         "bars_written": written,
         "resumed_from": processed_base if resume_checkpoint else 0,
+        **index_result,
     }
     if names_backfilled:
         result["names_backfilled"] = names_backfilled
@@ -245,7 +270,7 @@ def sync_bars(
         )
 
     do_repair = settings.sync_auto_repair if auto_repair is None else auto_repair
-    if do_repair and effective_mode == "incremental":
+    if not stock_error and do_repair and effective_mode == "incremental":
         repair_result = _maybe_auto_repair(
             sector=sector,
             adjust_type=adjust_type,
@@ -255,7 +280,7 @@ def sync_bars(
         if repair_result:
             result["auto_repair"] = repair_result
 
-    if written or result.get("auto_repair"):
+    if written or result.get("auto_repair") or index_result.get("index_bars_written"):
         from qmt_quant.core.catalog.export import clear_price_matrix_cache
         from qmt_quant.core.data.query import clear_browse_query_cache
         from qmt_quant.core.sync.check import clear_data_check_cache
@@ -264,4 +289,6 @@ def sync_bars(
         clear_browse_query_cache()
         clear_data_check_cache()
 
+    if stock_error:
+        raise stock_error
     return result

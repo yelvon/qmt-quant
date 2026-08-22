@@ -53,6 +53,17 @@ class XtDataClient:
         codes = self._xt.get_stock_list_in_sector(sector)
         return [normalize_code(c) for c in codes]
 
+    def get_sector_list(self) -> List[str]:
+        if self._bridge:
+            return list(self._bridge.get_sector_list())
+        names = []
+        if self._xt is not None and hasattr(self._xt, "get_sector_list"):
+            try:
+                names = self._xt.get_sector_list() or []
+            except Exception:
+                names = []
+        return [str(s).strip() for s in names if str(s).strip()]
+
     def get_instrument_detail(self, code: str) -> Dict[str, Any]:
         if self._bridge:
             return self._bridge.get_instrument_detail(code)

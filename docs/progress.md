@@ -1,6 +1,6 @@
 # qmt-quant Implementation Progress
 
-> Last updated: 2026-08-18
+> Last updated: 2026-08-22
 > PRD version: v0.3
 
 ## Phase Milestones
@@ -32,6 +32,7 @@
 | DS-015 | Parquet catalog export | Done (flat + NT MVP) |
 | DS-016 | Data quality checks | Done |
 | DS-浏览 | Daily bar / instrument browse + kline (Web + API) | Done |
+| DS-指数 | Benchmark + SW L1 industry index bars (`index_daily_bar`) attached to daily sync | Done |
 | DS-020 | Financial batch download | Done |
 | DS-021 | Core financial tables | Done |
 | DS-022 | report_date + announce_date | Done |

@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- 内置 `macd_cross` 策略：DIF 上穿 DEA（金叉）持有、下穿（死叉）空仓；研究层扫描快/慢/信号线参数，custom 验证与 Walk-Forward 共用同一插件
+- 日线同步附带基准指数与申万一级行业指数，写入独立表 `index_daily_bar` / `index_instrument`（不进股票 `daily_bar`）；数据浏览可切换「指数日线」核对；④ 沪深300 基准曲线读指数表
 - 实验中心：每次研究/验证保存 strategy identity、数据指纹、manifest、完整指标/诊断及隔离的 `reports/<run_id>/` 产物；新增实验列表、详情、双 run 比较 API 与 Web 页面
 - 选股 rolling 点时快照与审计：`SelectionSnapshotProvider` 在每个调仓日仅使用当时可见数据；rolling IC 支持多窗口/多 horizon
 - 代表性性能基线（300 标的、10 年、参数网格、周线、rolling IC），以 `performance` marker 显式运行

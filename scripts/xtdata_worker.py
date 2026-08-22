@@ -74,6 +74,17 @@ def _cmd_get_sector_stocks(xtdata, params):
     return {"codes": list(codes or [])}
 
 
+def _cmd_get_sector_list(xtdata, params):
+    _ensure_connect(xtdata)
+    names = []
+    if hasattr(xtdata, "get_sector_list"):
+        try:
+            names = xtdata.get_sector_list() or []
+        except Exception:
+            names = []
+    return {"sectors": [str(s) for s in names if str(s).strip()]}
+
+
 def _cmd_get_instrument_detail(xtdata, params):
     _ensure_connect(xtdata)
     code = params["code"]
@@ -287,6 +298,7 @@ HANDLERS = {
     "ping": _cmd_ping,
     "probe_port": _cmd_probe_port,
     "get_sector_stocks": _cmd_get_sector_stocks,
+    "get_sector_list": _cmd_get_sector_list,
     "get_instrument_detail": _cmd_get_instrument_detail,
     "download_history": _cmd_download_history,
     "get_market_bars": _cmd_get_market_bars,

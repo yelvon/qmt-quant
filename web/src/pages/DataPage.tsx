@@ -583,6 +583,9 @@ export default function DataPage() {
             </span>
           )}
         </div>
+        <p className="text-xs leading-relaxed text-slate-500">
+          日线会同时更新基准指数和申万一级行业指数（独立表，不写入股票日线）。首次基准拉最长约 20 年；行业只补有限区间（最多 3 年或本次窗口）。板块对不上则只更新基准。完成后可在数据浏览切换「指数日线」核对。
+        </p>
 
         <div className={barsBlocked ? "pointer-events-none space-y-5 opacity-45" : "space-y-5"}>
           <SyncModeSelector
@@ -634,7 +637,7 @@ export default function DataPage() {
             message={job.message || activePlanSummary}
             completeAction={
               job.status === "completed"
-                ? { label: "查看已同步数据", to: "/data/browse?tab=cross_section" }
+                ? { label: "查看已同步数据", to: "/data/browse?table=index_daily_bar&tab=cross_section" }
                 : undefined
             }
           />

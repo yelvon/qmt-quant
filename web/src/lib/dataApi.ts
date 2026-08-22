@@ -68,8 +68,23 @@ export function fetchKline(params: {
   return apiGet(`/api/data/kline?${qs.toString()}`);
 }
 
-export function fetchDateRange(adjust = "front"): Promise<DateRange> {
-  return apiGet(`/api/data/dates?adjust=${encodeURIComponent(adjust)}`);
+export function fetchDateRange(adjust = "front", table = "daily_bar"): Promise<DateRange> {
+  const qs = new URLSearchParams({ adjust, table });
+  return apiGet(`/api/data/dates?${qs.toString()}`);
+}
+
+export type IndexInstrument = {
+  code: string;
+  name: string;
+  kind: string;
+  source_sector?: string;
+};
+
+export async function fetchIndexInstruments(): Promise<IndexInstrument[]> {
+  const res = await apiGet<{ ok?: boolean; items?: IndexInstrument[] }>(
+    "/api/data/index-instruments"
+  );
+  return res.items || [];
 }
 
 export type InstrumentRow = {

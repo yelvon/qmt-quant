@@ -41,6 +41,51 @@ def test_data_meta(client):
     assert "adjust_options" in data
 
 
+def test_index_data_meta_and_query(client, db):
+    from qmt_quant.storage.database import db_session
+    from qmt_quant.storage.index_bars import IndexBarRow, upsert_index_bars, upsert_index_instruments
+
+    with db_session(db) as conn:
+        upsert_index_instruments(conn, [("000300.SH", "沪深300", "benchmark", None)])
+        upsert_index_bars(
+            conn,
+            [
+                IndexBarRow(
+                    code="000300.SH",
+                    date="2024-01-02",
+                    open=1,
+                    high=2,
+                    low=1,
+                    close=1.5,
+                    volume=1,
+                    amount=1,
+                    pre_close=1,
+                )
+            ],
+        )
+    meta = client.get("/api/data/meta?table=index_daily_bar")
+    assert meta.status_code == 200
+    assert meta.json()["table"] == "index_daily_bar"
+    assert meta.json()["adjust_options"] == []
+    res = client.get(
+        "/api/data/query?table=index_daily_bar&view_mode=cross_section&date=2024-01-02"
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 1
+    assert data["rows"][0]["kind"] == "基准"
+    assert data["rows"][0]["name"] == "沪深300"
+    inst = client.get("/api/data/index-instruments")
+    assert inst.status_code == 200
+    assert any(i["code"] == "000300.SH" for i in inst.json()["items"])
+    kline = client.get("/api/data/kline?code=000300.SH&adjust=front")
+    assert kline.status_code == 200
+    assert kline.json()["adjust"] == "none"
+    dates = client.get("/api/data/dates?table=index_daily_bar")
+    assert dates.status_code == 200
+    assert dates.json()["min_date"] == "2024-01-02"
+
+
 def test_data_query_missing_date(client):
     res = client.get("/api/data/query?table=daily_bar&view_mode=cross_section")
     assert res.status_code == 400
