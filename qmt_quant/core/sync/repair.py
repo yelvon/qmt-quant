@@ -270,29 +270,6 @@ def sync_bars_repair(
         clear_price_matrix_cache()
         clear_browse_query_cache()
         clear_data_check_cache()
-
-    lookback_starts = [str(dr.get("start") or "") for dr in ranges if dr.get("start")]
-    lookback_ends = [str(dr.get("end") or "") for dr in ranges if dr.get("end")]
-    try:
-        from qmt_quant.core.sync.index_sync import sync_index_bars
-
-        result.update(
-            sync_index_bars(
-                client=client,
-                job_start=lookback_starts[0] if lookback_starts else "",
-                job_end=lookback_ends[-1] if lookback_ends else "",
-                job_id=job_id,
-                repair=True,
-                lookback_start=min(lookback_starts) if lookback_starts else None,
-                lookback_end=max(lookback_ends) if lookback_ends else None,
-            )
-        )
-    except Exception as exc:
-        result["index_codes"] = 0
-        result["index_bars_written"] = 0
-        result["index_failed"] = ["*"]
-        result["index_error"] = str(exc)
-        result["industry_source_sector"] = None
     return result
 
 

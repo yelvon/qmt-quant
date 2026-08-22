@@ -14,7 +14,7 @@
 |------|------|------|
 | 1 doctor | 两环境各跑 `qmt-quant doctor` | xtquant OK（qmt-env）；路径可写 |
 | 2 init | `qmt-quant init-db` | migrations OK |
-| 3 sync | `sync universe` → `sync bars --incremental` → `sync financial` | bars/fin 有数据 |
+| 3 sync | `sync universe` → `sync bars --incremental` → `sync index` → `sync financial` | bars/index/fin 有数据 |
 | 3b check | `sync check --detailed` | 返回 freshness / stale_codes / needs_repair |
 | 3c repair | 删除某股近 10 日 bar → `sync check --repair` 或 Web「一键修复」 | 数据恢复 |
 | 3d fin incr | 连续两次 `sync financial`（第二次应 skipped 或 rows 更少） | 增量生效 |

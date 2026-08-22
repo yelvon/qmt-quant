@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from qmt_quant.config import get_settings
+from qmt_quant.core.presets import resolve_range_preset
 
 from qmt_quant.adapters.qmt.client import XtDataClient, normalize_code, to_qmt_date
 from qmt_quant.adapters.qmt.transform import index_bars_from_dataframe
@@ -95,6 +99,51 @@ def _fetch_batch(
     )
 
 
+def run_index_sync(
+    *,
+    incremental: bool = True,
+    incremental_days: Optional[int] = None,
+    job_id: Optional[str] = None,
+    client: Optional[XtDataClient] = None,
+) -> Dict[str, Any]:
+    """Standalone index sync used by CLI / jobs (not bundled with stock bars)."""
+    settings = get_settings()
+    days = incremental_days if incremental_days is not None else settings.sync_incremental_days
+    end = date.today().isoformat()
+    if incremental:
+        start = (date.today() - timedelta(days=max(1, int(days)))).isoformat()
+        force_full_windows = False
+    else:
+        start, end = resolve_range_preset("20y", max_date=end)
+        force_full_windows = True
+    if job_id:
+        report_job_progress(
+            job_id,
+            0.06,
+            "准备指数列表…",
+            step="prepare",
+            detail="增量" if incremental else "全量",
+        )
+    result = sync_index_bars(
+        client=client,
+        job_start=start,
+        job_end=end,
+        job_id=job_id,
+        standalone=True,
+        force_full_windows=force_full_windows,
+    )
+    result["mode"] = "incremental" if incremental else "full"
+    result["start"] = start
+    result["end"] = end
+    if result.get("index_bars_written"):
+        from qmt_quant.core.data.query import clear_browse_query_cache
+        from qmt_quant.core.sync.check import clear_data_check_cache
+
+        clear_browse_query_cache()
+        clear_data_check_cache()
+    return result
+
+
 def sync_index_bars(
     *,
     client: Optional[XtDataClient] = None,
@@ -104,6 +153,8 @@ def sync_index_bars(
     repair: bool = False,
     lookback_start: Optional[str] = None,
     lookback_end: Optional[str] = None,
+    standalone: bool = False,
+    force_full_windows: bool = False,
 ) -> Dict[str, Any]:
     if client is None:
         client = XtDataClient()
@@ -159,16 +210,19 @@ def sync_index_bars(
             repair=repair,
             lookback_start=lookback_start,
             lookback_end=lookback_end,
+            force_full_windows=force_full_windows,
         )
         windows.setdefault((start, end), []).append(code)
 
     written = 0
     total = len(codes)
     done = 0
+    progress_base = 0.08 if standalone else 0.93
+    progress_span = 0.88 if standalone else 0.04
     if job_id:
         report_job_progress(
             job_id,
-            0.93,
+            progress_base,
             f"同步基准与行业指数（{total} 只）",
             step="index",
             detail=industry_source or "仅基准",
@@ -207,7 +261,7 @@ def sync_index_bars(
             if job_id:
                 report_job_progress(
                     job_id,
-                    0.93 + 0.04 * (done / max(total, 1)),
+                    progress_base + progress_span * (done / max(total, 1)),
                     f"指数 {done}/{total}",
                     step="index",
                 )

@@ -131,12 +131,13 @@ def index_sync_window(
     repair: bool = False,
     lookback_start: Optional[str] = None,
     lookback_end: Optional[str] = None,
+    force_full_windows: bool = False,
 ) -> Tuple[str, str]:
     if repair:
         start = lookback_start or job_start
         end = lookback_end or job_end
         return start, end
-    if has_rows:
+    if has_rows and not force_full_windows:
         return job_start, job_end
     if kind == "benchmark":
         return resolve_range_preset("20y", max_date=job_end)

@@ -26,6 +26,8 @@ def test_pipeline_emits_progress_steps(monkeypatch):
     monkeypatch.setattr(runner, "_use_subprocess", lambda env: False)
 
     with patch("qmt_quant.core.sync.bars.sync_bars", return_value={"ok": True}), patch(
+        "qmt_quant.core.sync.index_sync.run_index_sync", return_value={"ok": True}
+    ), patch(
         "qmt_quant.core.research.runner.run_research", return_value={"run_id": "r1"}
     ), patch("qmt_quant.core.validation.runner.run_validation", return_value={"run_id": "v1"}):
         out = runner.run_pipeline({}, job_id="job123")

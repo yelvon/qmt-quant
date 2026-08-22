@@ -108,6 +108,11 @@ class ScreenIcBody(BaseModel):
     quantiles: int = 5
 
 
+class SyncIndexBody(BaseModel):
+    incremental: bool = True
+    days: int = 5
+
+
 class SyncFinancialBody(BaseModel):
     sector: str = "沪深A股"
     tables: List[str] = Field(default_factory=lambda: ["Balance", "Income", "CashFlow", "Pershareindex"])
@@ -535,6 +540,20 @@ def create_app() -> FastAPI:
             job_type="sync_bars",
             env="qmt",
             params=params,
+        )
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/sync/index")
+    def job_sync_index(body: SyncIndexBody) -> Dict[str, str]:
+        _require_qmt()
+        job_id = _submit_job_safe(
+            display_name="同步指数",
+            job_type="sync_index",
+            env="qmt",
+            params={
+                "incremental": body.incremental,
+                "incremental_days": body.days,
+            },
         )
         return {"job_id": job_id}
 

@@ -78,6 +78,17 @@ def sync_bars(
     typer.echo(json.dumps(stats, ensure_ascii=False, indent=2))
 
 
+@sync_app.command("index")
+def sync_index(
+    full: bool = typer.Option(False, help="Full re-download (20y benchmark / 3y industry)"),
+    days: int = typer.Option(5, help="Incremental lookback days"),
+) -> None:
+    from qmt_quant.core.sync.index_sync import run_index_sync as _sync
+
+    stats = _sync(incremental=not full, incremental_days=days)
+    typer.echo(json.dumps(stats, ensure_ascii=False, indent=2))
+
+
 @sync_app.command("financial")
 def sync_financial(
     tables: str = typer.Option(

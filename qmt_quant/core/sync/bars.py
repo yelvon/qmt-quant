@@ -190,26 +190,6 @@ def sync_bars(
     except Exception:
         sync_calendar_from_bars()
 
-    index_result: Dict[str, object] = {}
-    try:
-        from qmt_quant.core.sync.index_sync import sync_index_bars
-
-        index_result = sync_index_bars(
-            client=client,
-            job_start=start,
-            job_end=end,
-            job_id=job_id,
-            repair=False,
-        )
-    except Exception as exc:
-        index_result = {
-            "index_codes": 0,
-            "index_bars_written": 0,
-            "index_failed": ["*"],
-            "index_error": str(exc),
-            "industry_source_sector": None,
-        }
-
     names_backfilled = 0
     names_skipped = 0
     skip_names = effective_mode == "incremental" and not settings.sync_name_backfill_on_incremental
@@ -249,7 +229,6 @@ def sync_bars(
         "adjust_type": adjust_type,
         "bars_written": written,
         "resumed_from": processed_base if resume_checkpoint else 0,
-        **index_result,
     }
     if names_backfilled:
         result["names_backfilled"] = names_backfilled
@@ -280,7 +259,7 @@ def sync_bars(
         if repair_result:
             result["auto_repair"] = repair_result
 
-    if written or result.get("auto_repair") or index_result.get("index_bars_written"):
+    if written or result.get("auto_repair"):
         from qmt_quant.core.catalog.export import clear_price_matrix_cache
         from qmt_quant.core.data.query import clear_browse_query_cache
         from qmt_quant.core.sync.check import clear_data_check_cache

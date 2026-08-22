@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- 日线同步附带基准指数与申万一级行业指数，写入独立表 `index_daily_bar` / `index_instrument`（不进股票 `daily_bar`）；数据浏览可切换「指数日线」核对；④ 沪深300 基准曲线读指数表
+- 指数日线写入独立表 `index_daily_bar` / `index_instrument`（不进股票 `daily_bar`）；数据浏览可切换「指数日线」核对；④ 沪深300 基准曲线读指数表
 - 实验中心：每次研究/验证保存 strategy identity、数据指纹、manifest、完整指标/诊断及隔离的 `reports/<run_id>/` 产物；新增实验列表、详情、双 run 比较 API 与 Web 页面
 - 选股 rolling 点时快照与审计：`SelectionSnapshotProvider` 在每个调仓日仅使用当时可见数据；rolling IC 支持多窗口/多 horizon
 - 代表性性能基线（300 标的、10 年、参数网格、周线、rolling IC），以 `performance` marker 显式运行
@@ -58,6 +58,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- 指数同步从个股日线任务拆出：② 准备数据独立「指数同步」卡片；CLI `sync index`；`POST /api/jobs/sync/index`。日线与缺口修复不再顺带拉指数；一键跑通仍会在日线后补一次增量指数
 - Nautilus 明确降级为显式实验引擎：仅 `ma_cross`、日线、最多导入 10 标的且当前只运行首标的 SIM 策略；依赖/Catalog/能力失败直接报错，绝不 fallback custom
 - 默认 `pytest` 排除 `performance` marker；本地数据库 fixture 会清空目标库，文档统一要求使用独立 `qmt_quant_test`
 - Web 主导航调整为 ⑤实验中心、⑥选股/实盘高级

@@ -39,19 +39,10 @@ def test_incremental_skips_name_backfill_by_default():
                                                 with patch.object(
                                                     bars_mod, "get_settings", return_value=settings
                                                 ):
-                                                    with patch(
-                                                        "qmt_quant.core.sync.index_sync.sync_index_bars",
-                                                        return_value={
-                                                            "index_codes": 0,
-                                                            "index_bars_written": 0,
-                                                            "index_failed": [],
-                                                            "industry_source_sector": None,
-                                                        },
-                                                    ):
-                                                        result = bars_mod.sync_bars(
-                                                            incremental=True,
-                                                            mode="incremental",
-                                                        )
+                                                    result = bars_mod.sync_bars(
+                                                        incremental=True,
+                                                        mode="incremental",
+                                                    )
     mock_backfill.assert_not_called()
     mock_count.assert_called_once()
     assert result["names_skipped"] == 5108

@@ -142,7 +142,7 @@ export default function DataBrowsePage() {
         columns: res.columns?.length ? res.columns : meta?.columns || [],
       });
       if (isIndex && res.total === 0) {
-        setError("指数日线为空。请先在②同步日线（指数随日线任务写入独立表）。");
+        setError("指数日线为空。请先在②准备数据页使用「指数同步」。");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -181,7 +181,7 @@ export default function DataBrowsePage() {
           setCode(String(res.rows[0].code));
         }
         if (isIndex && res.total === 0) {
-          setError("指数日线为空。请先在②同步日线（指数随日线任务写入独立表）。");
+          setError("指数日线为空。请先在②准备数据页使用「指数同步」。");
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -325,10 +325,10 @@ export default function DataBrowsePage() {
         {isIndex ? (
           <>
             浏览基准与申万一级行业指数（独立表，不复权）。空表请先在{" "}
-            <Link to="/data" className="text-emerald-400 hover:underline">
-              ② 准备数据
+            <Link to="/data#index-sync" className="text-emerald-400 hover:underline">
+              ② 准备数据 · 指数同步
             </Link>{" "}
-            同步日线——指数会随股票日线任务一并写入。
+            单独拉取，不必再跑一遍全市场个股日线。
           </>
         ) : (
           <>
@@ -435,10 +435,10 @@ export default function DataBrowsePage() {
                   ) : (
                     <p className="text-sm text-amber-200">
                       尚未发现已同步指数。请先在{" "}
-                      <Link to="/data" className="underline">
-                        ② 准备数据
-                      </Link>{" "}
-                      同步日线。
+                      <Link to="/data#index-sync" className="underline">
+                        ② 准备数据 · 指数同步
+                      </Link>
+                      。
                     </p>
                   )
                 ) : (
@@ -524,8 +524,8 @@ export default function DataBrowsePage() {
               {(klineError.includes("同步") || klineError.includes("指数日线")) && (
                 <>
                   {" "}
-                  <Link to="/data" className="text-emerald-300 underline">
-                    去同步数据
+                  <Link to={klineError.includes("指数") ? "/data#index-sync" : "/data"} className="text-emerald-300 underline">
+                    {klineError.includes("指数") ? "去同步指数" : "去同步数据"}
                   </Link>
                 </>
               )}

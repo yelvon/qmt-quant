@@ -18,6 +18,10 @@ export const JOB_STEP_DEFS: Record<string, JobStepDef[]> = {
     { id: "names", label: "补全名称" },
     { id: "export", label: "导出文件" },
   ],
+  sync_index: [
+    { id: "prepare", label: "准备" },
+    { id: "index", label: "下载指数" },
+  ],
   sync_financial: [
     { id: "prepare", label: "准备" },
     { id: "sync", label: "拉取财报" },

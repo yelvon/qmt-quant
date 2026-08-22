@@ -68,6 +68,9 @@ def run_data_summary(
             fin_watermark = fin_watermark[:10]
 
         last_scan = get_meta_json(conn, f"last_gap_scan:{sector}")
+        from qmt_quant.storage.index_bars import index_coverage_stats
+
+        index_stats = index_coverage_stats(conn)
 
     result: Dict[str, object] = {
         "adjust_type": adjust,
@@ -83,6 +86,7 @@ def run_data_summary(
         "financial_announce_max": fin_announce_max,
         "financial_watermark": fin_watermark,
         "last_health_scan": last_scan,
+        **index_stats,
     }
     if use_cache:
         _SUMMARY_CACHE.set(cache_key, result)

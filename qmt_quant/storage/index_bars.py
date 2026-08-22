@@ -124,3 +124,26 @@ def is_known_index(conn: DbConnection, code: str) -> bool:
 def index_date_range(conn: DbConnection) -> Dict[str, Optional[str]]:
     row = conn.execute("SELECT MIN(date), MAX(date) FROM index_daily_bar").fetchone()
     return {"min_date": row[0] if row else None, "max_date": row[1] if row else None}
+
+
+def index_coverage_stats(conn: DbConnection) -> Dict[str, object]:
+    kinds = {str(kind): int(count or 0) for kind, count in conn.execute(
+        "SELECT kind, COUNT(*) FROM index_instrument GROUP BY kind"
+    ).fetchall()}
+    bar_codes = conn.execute("SELECT COUNT(DISTINCT code) FROM index_daily_bar").fetchone()
+    rng = index_date_range(conn)
+    hs = conn.execute(
+        "SELECT MIN(date), MAX(date), COUNT(*) FROM index_daily_bar WHERE code = %s",
+        ("000300.SH",),
+    ).fetchone()
+    return {
+        "index_instrument_count": sum(kinds.values()),
+        "index_benchmark_count": kinds.get("benchmark", 0),
+        "index_industry_count": kinds.get("industry", 0),
+        "index_bar_codes_count": int(bar_codes[0] or 0) if bar_codes else 0,
+        "index_date_min": rng.get("min_date"),
+        "index_date_max": rng.get("max_date"),
+        "hs300_date_min": hs[0] if hs else None,
+        "hs300_date_max": hs[1] if hs else None,
+        "hs300_bar_count": int(hs[2] or 0) if hs else 0,
+    }

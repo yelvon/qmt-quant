@@ -2,6 +2,7 @@
 
 export type JobType =
   | "sync_bars"
+  | "sync_index"
   | "sync_financial"
   | "sync_check_repair"
   | "sync_repair"
@@ -17,6 +18,10 @@ export type JobType =
 
 export function isBarsSyncJob(jobType: string): boolean {
   return jobType === "sync_bars";
+}
+
+export function isIndexSyncJob(jobType: string): boolean {
+  return jobType === "sync_index";
 }
 
 export function isFinancialSyncJob(jobType: string): boolean {
@@ -55,6 +60,8 @@ export function jobTypeLabel(jobType: string): string {
   switch (jobType) {
     case "sync_bars":
       return "日线同步";
+    case "sync_index":
+      return "指数同步";
     case "sync_financial":
       return "财报同步";
     case "sync_check_repair":
@@ -85,6 +92,7 @@ export function jobTypeLabel(jobType: string): string {
 
 export function inferJobTypeFromMessage(message: string): string {
   if (message.includes("健康") || message.includes("扫描本地")) return "data_check";
+  if (message.includes("指数")) return "sync_index";
   if (message.includes("财报")) return "sync_financial";
   if (message.includes("修复")) return "sync_check_repair";
   if (message.includes("导出")) return "catalog_export";
@@ -105,6 +113,7 @@ export function inferJobTypeFromMessage(message: string): string {
 export function jobRouteForType(jobType: string): string {
   switch (jobType) {
     case "sync_bars":
+    case "sync_index":
     case "sync_financial":
     case "sync_repair":
     case "sync_check_repair":

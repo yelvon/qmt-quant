@@ -7,6 +7,7 @@ import {
   inferJobTypeFromMessage,
   isBarsSyncJob,
   isFinancialSyncJob,
+  isIndexSyncJob,
   isRepairJob,
 } from "../lib/jobTypes";
 import PresetSelect from "../components/PresetSelect";
@@ -15,6 +16,7 @@ import DataHealthPanel from "../components/DataHealthPanel";
 import SyncModeSelector from "../components/SyncModeSelector";
 import SyncPlanPreview from "../components/SyncPlanPreview";
 import FinancialSyncPanel from "../components/FinancialSyncPanel";
+import IndexSyncPanel from "../components/IndexSyncPanel";
 import WatchlistPanel from "../components/WatchlistPanel";
 import ResumableSyncBanner, { type ResumableJob } from "../components/ResumableSyncBanner";
 import {
@@ -112,6 +114,7 @@ export default function DataPage() {
   const [syncMode, setSyncMode] = useState<SyncMode>("incremental");
   const [rangePreset, setRangePreset] = useState<RangePresetId>("5y");
   const [financialFull, setFinancialFull] = useState(false);
+  const [indexFull, setIndexFull] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [sectors, setSectors] = useState<{ id: string; label: string }[]>([]);
   const [summary, setSummary] = useState<any>(null);
@@ -126,6 +129,7 @@ export default function DataPage() {
   summaryRef.current = summary;
   const defaultsAppliedRef = useRef(false);
   const financialSectionRef = useRef<HTMLDivElement>(null);
+  const indexSectionRef = useRef<HTMLDivElement>(null);
   const [qmtOk, setQmtOk] = useState<boolean | null>(null);
   const [qmtMessage, setQmtMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -133,6 +137,7 @@ export default function DataPage() {
   const [resuming, setResuming] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [financialError, setFinancialError] = useState<string | null>(null);
+  const [indexError, setIndexError] = useState<string | null>(null);
   const [activePlanSummary, setActivePlanSummary] = useState<string>("");
   const [resumableJobs, setResumableJobs] = useState<ResumableJob[]>([]);
   const [resumingJobId, setResumingJobId] = useState<string | null>(null);
@@ -145,6 +150,7 @@ export default function DataPage() {
   const stockCount = summary?.universe_total ?? 0;
   const hasLocalBars = Boolean(summary?.bar_date_min || summary?.bar_date_max);
   const hasLocalFinancial = (summary?.financial_row_count ?? 0) > 0;
+  const hasLocalIndex = (summary?.index_instrument_count ?? 0) > 0 || Boolean(summary?.index_date_min);
 
   const syncPlan = useMemo(
     () =>
@@ -157,6 +163,7 @@ export default function DataPage() {
   );
 
   const barsJobActive = Boolean(job.jobId) && isBarsSyncJob(effectiveJobType);
+  const indexJobActive = Boolean(job.jobId) && isIndexSyncJob(effectiveJobType);
   const financialJobActive = Boolean(job.jobId) && isFinancialSyncJob(effectiveJobType);
   const repairJobActive = Boolean(job.jobId) && isRepairJob(effectiveJobType);
   const repairRunning = repairJobActive && (job.status === "running" || job.status === "pending");
@@ -189,6 +196,11 @@ export default function DataPage() {
         document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
     }
+    if (window.location.hash === "#index-sync") {
+      window.setTimeout(() => {
+        document.getElementById("index-sync")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
   }, []);
 
   useEffect(() => {
@@ -203,11 +215,20 @@ export default function DataPage() {
   const qmtBusy =
     job.isRunning &&
     (isBarsSyncJob(effectiveJobType) ||
+      isIndexSyncJob(effectiveJobType) ||
       isFinancialSyncJob(effectiveJobType) ||
       isRepairJob(effectiveJobType) ||
       effectiveJobType === "catalog_export");
   const barsBlocked = qmtBusy && !isBarsSyncJob(effectiveJobType);
+  const indexBlocked = qmtBusy && !isIndexSyncJob(effectiveJobType);
   const financialBlocked = qmtBusy && !isFinancialSyncJob(effectiveJobType);
+  const qmtBusyLabel = isBarsSyncJob(effectiveJobType)
+    ? "日线同步进行中"
+    : isIndexSyncJob(effectiveJobType)
+      ? "指数同步进行中"
+      : isFinancialSyncJob(effectiveJobType)
+        ? "财报同步进行中"
+        : "其他任务进行中";
 
   const refreshSummary = useCallback((refresh = false) => {
     if (summaryRef.current === null) {
@@ -343,6 +364,12 @@ export default function DataPage() {
   }, [job.status, job.jobId, effectiveJobType, healthCheck, runHealthCheck]);
 
   useEffect(() => {
+    if (indexJobActive && job.isRunning) {
+      indexSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [indexJobActive, job.isRunning, job.jobId]);
+
+  useEffect(() => {
     if (financialJobActive && job.isRunning) {
       financialSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
@@ -370,6 +397,7 @@ export default function DataPage() {
   async function resumeFromJob(target: ResumableJob) {
     setResumingJobId(target.job_id);
     setSubmitError(null);
+    setIndexError(null);
     setFinancialError(null);
     try {
       const res = await apiPost<{ job_id: string }>(`/api/jobs/${target.job_id}/resume`);
@@ -378,6 +406,7 @@ export default function DataPage() {
     } catch (err) {
       const msg = parseApiError(err instanceof Error ? err.message : String(err));
       if (target.job_type === "sync_financial") setFinancialError(msg);
+      else if (target.job_type === "sync_index") setIndexError(msg);
       else setSubmitError(msg);
     } finally {
       setResumingJobId(null);
@@ -415,6 +444,17 @@ export default function DataPage() {
       `${syncPlan.progressPrefix} ${syncPlan.start} ~ ${syncPlan.end}…`,
       "sync_bars",
       setSubmitError
+    );
+  }
+
+  async function syncIndex() {
+    const modeLabel = indexFull ? "全量" : "增量";
+    await startJobRequest(
+      "/api/jobs/sync/index",
+      { incremental: !indexFull, days: INCREMENTAL_TRADING_DAYS },
+      `${modeLabel}同步指数…`,
+      "sync_index",
+      setIndexError
     );
   }
 
@@ -461,12 +501,14 @@ export default function DataPage() {
   async function handleCancel() {
     setCancelling(true);
     setSubmitError(null);
+    setIndexError(null);
     setFinancialError(null);
     try {
       await job.cancelJob();
     } catch (err) {
       const msg = parseApiError(err instanceof Error ? err.message : String(err));
       if (financialJobActive) setFinancialError(msg);
+      else if (indexJobActive) setIndexError(msg);
       else setSubmitError(msg);
     } finally {
       setCancelling(false);
@@ -476,6 +518,7 @@ export default function DataPage() {
   async function handleResume() {
     setResuming(true);
     setSubmitError(null);
+    setIndexError(null);
     setFinancialError(null);
     try {
       await job.resumeJob();
@@ -483,6 +526,7 @@ export default function DataPage() {
     } catch (err) {
       const msg = parseApiError(err instanceof Error ? err.message : String(err));
       if (financialJobActive) setFinancialError(msg);
+      else if (indexJobActive) setIndexError(msg);
       else setSubmitError(msg);
     } finally {
       setResuming(false);
@@ -512,6 +556,7 @@ export default function DataPage() {
   };
 
   const barsSyncDisabled = submitting || qmtBusy || qmtOk === false;
+  const indexSyncDisabled = submitting || qmtBusy || qmtOk === false;
   const financialSyncDisabled = submitting || qmtBusy || qmtOk === false;
   const barsModeLocked = qmtBusy;
 
@@ -530,6 +575,17 @@ export default function DataPage() {
             {hasLocalBars ? (
               <Link to="/data/browse?tab=cross_section" className="ml-1 font-mono text-emerald-300 hover:underline">
                 {formatLocalRange(summary?.bar_date_min, summary?.bar_date_max)}
+              </Link>
+            ) : (
+              <span className="ml-1 text-slate-500">{summaryLoading ? "加载中…" : "暂无"}</span>
+            )}
+          </span>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-300">
+            本地指数：
+            {hasLocalIndex ? (
+              <Link to="/data/browse?table=index_daily_bar&tab=kline" className="ml-1 font-mono text-emerald-300 hover:underline">
+                {formatLocalRange(summary?.index_date_min, summary?.index_date_max)}
               </Link>
             ) : (
               <span className="ml-1 text-slate-500">{summaryLoading ? "加载中…" : "暂无"}</span>
@@ -578,13 +634,11 @@ export default function DataPage() {
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-medium text-slate-100">日线 K 线</h2>
           {barsBlocked && (
-            <span className="text-xs text-amber-300/90">
-              {isFinancialSyncJob(effectiveJobType) ? "财报同步进行中" : "其他任务进行中"}
-            </span>
+            <span className="text-xs text-amber-300/90">{qmtBusyLabel}</span>
           )}
         </div>
         <p className="text-xs leading-relaxed text-slate-500">
-          日线会同时更新基准指数和申万一级行业指数（独立表，不写入股票日线）。首次基准拉最长约 20 年；行业只补有限区间（最多 3 年或本次窗口）。板块对不上则只更新基准。完成后可在数据浏览切换「指数日线」核对。
+          仅同步股票日线。基准与行业指数请用下方「指数同步」卡片，避免为了对一下沪深300再拉全市场个股。
         </p>
 
         <div className={barsBlocked ? "pointer-events-none space-y-5 opacity-45" : "space-y-5"}>
@@ -637,7 +691,56 @@ export default function DataPage() {
             message={job.message || activePlanSummary}
             completeAction={
               job.status === "completed"
-                ? { label: "查看已同步数据", to: "/data/browse?table=index_daily_bar&tab=cross_section" }
+                ? { label: "查看已同步数据", to: "/data/browse?tab=cross_section" }
+                : undefined
+            }
+          />
+        )}
+      </div>
+
+      <div id="index-sync" ref={indexSectionRef} className="card mb-4 scroll-mt-24 space-y-5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-medium text-slate-100">指数同步</h2>
+          {indexBlocked && (
+            <span className="text-xs text-amber-300/90">{qmtBusyLabel}</span>
+          )}
+        </div>
+        <div className={indexBlocked ? "pointer-events-none space-y-5 opacity-45" : "space-y-5"}>
+          <IndexSyncPanel
+            incremental={!indexFull}
+            instrumentCount={summary?.index_instrument_count}
+            benchmarkCount={summary?.index_benchmark_count}
+            industryCount={summary?.index_industry_count}
+            dateMin={summary?.index_date_min}
+            dateMax={summary?.index_date_max}
+            hs300Min={summary?.hs300_date_min}
+            hs300Max={summary?.hs300_date_max}
+          />
+          <label className="flex items-center gap-2 text-sm text-slate-400">
+            <input
+              type="checkbox"
+              checked={indexFull}
+              onChange={(e) => setIndexFull(e.target.checked)}
+              disabled={indexSyncDisabled}
+            />
+            全量重拉（默认增量；本地已有则只补最近窗口）
+          </label>
+          <button
+            className="btn-secondary w-full sm:w-auto"
+            disabled={indexSyncDisabled}
+            onClick={syncIndex}
+          >
+            开始{indexFull ? "全量" : "增量"}同步指数
+          </button>
+          {indexError && <p className="text-sm text-red-300">{indexError}</p>}
+        </div>
+        {indexJobActive && (
+          <JobProgressBar
+            {...jobProgressProps(job, progressExtras)}
+            heading="指数同步进度"
+            completeAction={
+              job.status === "completed"
+                ? { label: "查看指数日线", to: "/data/browse?table=index_daily_bar&tab=kline" }
                 : undefined
             }
           />
@@ -648,7 +751,7 @@ export default function DataPage() {
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-medium text-slate-100">财报同步</h2>
           {financialBlocked && (
-            <span className="text-xs text-amber-300/90">日线同步进行中</span>
+            <span className="text-xs text-amber-300/90">{qmtBusyLabel}</span>
           )}
         </div>
 

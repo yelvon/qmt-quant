@@ -89,6 +89,31 @@ def test_index_sync_window_rules():
         lookback_end="2026-08-01",
     ) == ("2026-01-01", "2026-08-01")
 
+    forced_start, forced_end = index_sync_window(
+        kind="benchmark",
+        has_rows=True,
+        job_start=job_start,
+        job_end=job_end,
+        force_full_windows=True,
+    )
+    assert forced_end == job_end
+    assert forced_start < "2008-01-01"
+
+
+def test_run_index_sync_marks_standalone_and_mode():
+    from qmt_quant.core.sync.index_sync import run_index_sync
+
+    with patch("qmt_quant.core.sync.index_sync.get_settings") as gs:
+        gs.return_value.sync_incremental_days = 5
+        with patch(
+            "qmt_quant.core.sync.index_sync.sync_index_bars",
+            return_value={"index_bars_written": 0, "index_codes": 8, "index_failed": []},
+        ) as mocked:
+            result = run_index_sync(incremental=True, incremental_days=5)
+    assert result["mode"] == "incremental"
+    assert mocked.call_args.kwargs["standalone"] is True
+    assert mocked.call_args.kwargs["force_full_windows"] is False
+
 
 def _bar_frame():
     idx = pd.to_datetime(["2024-01-02", "2024-01-03"])
@@ -201,7 +226,7 @@ def test_industry_constituents_not_fetched(db):
     assert daily == 0
 
 
-def test_index_failure_does_not_fail_stock_sync():
+def test_sync_bars_does_not_call_index_sync():
     from qmt_quant.core.sync import bars as bars_mod
 
     settings = MagicMock()
@@ -227,17 +252,17 @@ def test_index_failure_does_not_fail_stock_sync():
                                                 return_value=0,
                                             ):
                                                 with patch(
-                                                    "qmt_quant.core.sync.index_sync.sync_index_bars",
-                                                    side_effect=RuntimeError("qmt timeout"),
-                                                ):
+                                                    "qmt_quant.core.sync.index_sync.sync_index_bars"
+                                                ) as idx:
                                                     result = bars_mod.sync_bars(
                                                         incremental=True, mode="incremental"
                                                     )
     assert result["bars_written"] == 7
-    assert result["index_failed"] == ["*"]
+    assert "index_bars_written" not in result
+    idx.assert_not_called()
 
 
-def test_stock_error_still_attempts_index_sync():
+def test_stock_error_does_not_run_index_sync():
     from qmt_quant.core.sync import bars as bars_mod
 
     settings = MagicMock()
@@ -261,19 +286,13 @@ def test_stock_error_still_attempts_index_sync():
                                     with patch.object(bars_mod, "XtDataClient"):
                                         with patch.object(bars_mod, "get_settings", return_value=settings):
                                             with patch(
-                                                "qmt_quant.core.sync.index_sync.sync_index_bars",
-                                                return_value={
-                                                    "index_codes": 8,
-                                                    "index_bars_written": 1,
-                                                    "index_failed": [],
-                                                    "industry_source_sector": None,
-                                                },
+                                                "qmt_quant.core.sync.index_sync.sync_index_bars"
                                             ) as idx:
                                                 with pytest.raises(RuntimeError, match="stock fail"):
                                                     bars_mod.sync_bars(
                                                         incremental=True, mode="incremental"
                                                     )
-                                                idx.assert_called_once()
+                                                idx.assert_not_called()
 
 
 def test_resolve_universe_does_not_inject_benchmarks(monkeypatch):

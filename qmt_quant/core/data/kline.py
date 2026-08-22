@@ -68,7 +68,7 @@ def build_kline_payload(
 
     if use_index:
         rows = _index_kline_rows(conn, norm, date_from, date_to)
-        empty_hint = "无指数日线，请先在「② 准备数据」同步日线（指数随日线任务写入独立表）"
+        empty_hint = "无指数日线，请先在「② 准备数据」使用指数同步"
         adjust_out = "none"
     else:
         clauses = ["code = %s", "adjust_type = %s"]

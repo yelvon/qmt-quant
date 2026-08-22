@@ -21,6 +21,14 @@ def _dispatch(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         from qmt_quant.core.sync.bars import sync_bars
 
         return sync_bars(**params)
+    if job_type == "sync_index":
+        from qmt_quant.core.sync.index_sync import run_index_sync
+
+        return run_index_sync(
+            incremental=bool(params.get("incremental", True)),
+            incremental_days=params.get("incremental_days") or params.get("days"),
+            job_id=params.get("job_id"),
+        )
     if job_type == "sync_financial":
         from qmt_quant.core.sync.financial import sync_financial
 

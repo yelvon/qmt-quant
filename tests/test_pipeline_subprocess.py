@@ -17,6 +17,6 @@ def test_pipeline_sync_uses_qmt_subprocess_when_configured():
     ):
         out = run_pipeline({"days": 5, "sector": "沪深A股"})
     assert out["sync"] == {"synced": 1}
-    mock_sub.assert_called_once()
-    assert mock_sub.call_args[0][0] == "sync_bars"
-    assert mock_sub.call_args[0][1] == "qmt"
+    assert mock_sub.call_args_list[0][0][0] == "sync_bars"
+    assert mock_sub.call_args_list[0][0][1] == "qmt"
+    assert mock_sub.call_args_list[1][0][0] == "sync_index"

@@ -29,7 +29,9 @@ JobHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
 _HANDLERS: Dict[str, JobHandler] = {}
 _SUBSCRIBERS: List[Callable[[str, Dict[str, Any]], None]] = []
 
-QMT_JOB_TYPES = frozenset({"sync_bars", "sync_financial", "sync_repair", "sync_check_repair"})
+QMT_JOB_TYPES = frozenset(
+    {"sync_bars", "sync_index", "sync_financial", "sync_repair", "sync_check_repair"}
+)
 QMT_SYNC_TYPES = QMT_JOB_TYPES
 
 
@@ -294,6 +296,14 @@ def _dispatch_builtin(job_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         work = dict(params)
         work.pop("days", None)  # legacy alias from older clients
         return sync_bars(**work)
+    if job_type == "sync_index":
+        from qmt_quant.core.sync.index_sync import run_index_sync
+
+        return run_index_sync(
+            incremental=bool(params.get("incremental", True)),
+            incremental_days=params.get("incremental_days") or params.get("days"),
+            job_id=params.get("job_id"),
+        )
     if job_type == "sync_financial":
         from qmt_quant.core.sync.financial import sync_financial
 
@@ -398,6 +408,17 @@ def run_pipeline(params: Dict[str, Any], job_id: Optional[str] = None) -> Dict[s
             out["sync"] = _run_subprocess("sync_bars", "qmt", sync_params)
         else:
             out["sync"] = sync_bars(**sync_params)
+        try:
+            from qmt_quant.core.sync.index_sync import run_index_sync
+
+            _step(0.28, "sync", "同步指数")
+            index_params = {"incremental": True, "job_id": job_id}
+            if _use_subprocess("qmt"):
+                out["index"] = _run_subprocess("sync_index", "qmt", index_params)
+            else:
+                out["index"] = run_index_sync(**index_params)
+        except Exception as exc:
+            out["index_error"] = str(exc)
     except Exception as exc:
         raise RuntimeError(f"[sync] {exc}") from exc
     try:

@@ -204,6 +204,8 @@ python -m qmt_quant.cli sync check --repair      # 检查并修复
 python -m qmt_quant.cli sync repair              # 仅修复
 python -m qmt_quant.cli sync financial           # 财报增量（默认）
 python -m qmt_quant.cli sync financial --full    # 财报全量
+python -m qmt_quant.cli sync index               # 指数增量（默认）
+python -m qmt_quant.cli sync index --full        # 指数全量（基准约 20 年）
 python -m qmt_quant.cli sync calendar            # 从 QMT 同步交易日历
 ```
 
@@ -257,6 +259,8 @@ tail -f logs/api.log
 ```powershell
 # 数据
 python -m qmt_quant.cli sync bars --incremental
+python -m qmt_quant.cli sync index
+python -m qmt_quant.cli sync index --full
 python -m qmt_quant.cli sync check --detailed
 python -m qmt_quant.cli sync check --repair
 python -m qmt_quant.cli sync repair
